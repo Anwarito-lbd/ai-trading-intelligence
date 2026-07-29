@@ -64,7 +64,7 @@ def resolve_quick_model(provider: str | None = None) -> str:
             explicit if explicit and not _is_ollama_tag(explicit) else "llama-3.1-8b-instant",
         )
     if provider == "gemini":
-        return os.getenv("UTI_GEMINI_QUICK_MODEL", "gemini-2.0-flash")
+        return os.getenv("UTI_GEMINI_QUICK_MODEL", "gemini-2.5-flash")
     if provider == "cerebras":
         return os.getenv("UTI_CEREBRAS_QUICK_MODEL", "llama-3.3-70b")
     if provider == "openrouter":
@@ -91,7 +91,7 @@ def resolve_deep_model(provider: str | None = None) -> str:
             os.getenv("UTI_GROQ_QUICK_MODEL", "llama-3.1-8b-instant"),
         )
     if provider == "gemini":
-        return os.getenv("UTI_GEMINI_DEEP_MODEL", "gemini-2.0-flash")
+        return os.getenv("UTI_GEMINI_DEEP_MODEL", "gemini-2.5-flash")
     if provider == "cerebras":
         return os.getenv("UTI_CEREBRAS_DEEP_MODEL", "llama-3.3-70b")
     if provider == "openrouter":
