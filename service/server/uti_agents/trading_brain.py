@@ -24,6 +24,7 @@ from intel.llm import (
     resolve_llm_provider,
     resolve_quick_model,
 )
+from uti_agents.consensus import apply_consensus, build_consensus
 from uti_agents.pine_analyst import build_pine_technical_report
 
 logger = logging.getLogger(__name__)
@@ -85,8 +86,35 @@ class TradingBrain:
         if self.llm_provider in _LLM_REFINE_PROVIDERS:
             refined = self._refine_with_llm(result, confluence, intel, swarm, kronos)
             if refined is not None:
-                return refined
-        return result
+                result = refined
+        return self._gate_with_consensus(result, confluence, intel, swarm, kronos)
+
+    def _gate_with_consensus(
+        self,
+        result: dict[str, Any],
+        confluence: dict[str, Any],
+        intel: dict[str, Any],
+        swarm: dict[str, Any] | None,
+        kronos: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        consensus = build_consensus(
+            confluence=confluence, intel=intel, swarm=swarm, kronos=kronos
+        )
+        before = str(result.get("trader") or "WAIT").upper()
+        after, why = apply_consensus(before, consensus)
+        out = dict(result)
+        out["trader"] = after
+        out["consensus"] = consensus
+        out["consensus_override"] = before != after
+        out["consensus_reason"] = why
+        if before != after:
+            out["notes"] = f"{out.get('notes') or ''} | gated {before}→{after}: {why}".strip(" |")
+            # Lower confidence when we force WAIT on conflict
+            if after == "WAIT":
+                out["ai_confidence"] = min(float(out.get("ai_confidence") or 50), 48.0)
+        out.setdefault("providers_used", {})
+        out["providers_used"]["pine"] = bool(confluence.get("ready") or (confluence.get("active_votes") or 0) > 0)
+        return out
 
     def _refine_with_llm(
         self,
@@ -102,29 +130,32 @@ class TradingBrain:
         prompt = (
             f"Symbol: {confluence.get('symbol')} TF: {confluence.get('timeframe')}\n"
             f"Pine technical: {confluence.get('technical_score')}/100 dir={confluence.get('direction')} "
-            f"ready={confluence.get('ready')} votes={confluence.get('vote_count')}\n"
+            f"ready={confluence.get('ready')} (MISSING pine = ignore technical edge)\n"
             f"WorldMonitor: news={intel.get('news_score')} macro={intel.get('macro_bias')} "
             f"geo={intel.get('geopolitical_risk')} source={intel.get('source')}\n"
-            f"MiroFish swarm: bias={(swarm or {}).get('bias')} score={(swarm or {}).get('score')} "
-            f"source={(swarm or {}).get('source')}\n"
+            f"MiroFish swarm: bias={(swarm or {}).get('bias')} score={(swarm or {}).get('score')}\n"
             f"Kronos: bias={(kronos or {}).get('bias')} score={(kronos or {}).get('score')} "
-            f"chg%={(kronos or {}).get('change_pct')} source={(kronos or {}).get('source')}\n"
+            f"chg%={(kronos or {}).get('change_pct')}\n"
             f"Desk heuristic: trader={heuristic.get('trader')} "
             f"bull={heuristic.get('bull_research')} bear={heuristic.get('bear_research')}\n"
-            "You are the final trader combining ALL of the above into one paper decision.\n"
+            "RULES:\n"
+            "1) If WorldMonitor/macro/news is BULLISH and Kronos is BEARISH (or reverse), choose WAIT.\n"
+            "2) Do not SELL when macro is BULLISH unless Pine confluence is ready SELL.\n"
+            "3) Do not BUY when macro is BEARISH unless Pine confluence is ready BUY.\n"
+            "4) Prefer WAIT over a weak trade.\n"
             "Return exactly one line: DECISION=<BUY|SELL|WAIT>; CONFIDENCE=<0-100>; REASON=<short>"
         )
         content = chat_completion(
             provider=self.llm_provider,
             model=self.quick_model,
-            temperature=0.2,
+            temperature=0.1,
             max_tokens=120,
             messages=[
                 {
                     "role": "system",
                     "content": (
-                        "Unified trading desk final trader. Weigh Pine + WorldMonitor + "
-                        "MiroFish + Kronos together. Prefer WAIT when evidence conflicts."
+                        "You are the final trader on a unified desk. "
+                        "Conflicts between WorldMonitor and Kronos must become WAIT, not a forced trade."
                     ),
                 },
                 {"role": "user", "content": prompt},

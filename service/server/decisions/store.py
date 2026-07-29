@@ -166,13 +166,26 @@ def insert_decision(record: dict[str, Any]) -> dict[str, Any]:
 
 def serialize_decision_row(row: dict[str, Any]) -> dict[str, Any]:
     trade_number = int(row.get("trade_number") or 0)
+    paper = row.get("paper_trade") if isinstance(row.get("paper_trade"), dict) else _loads(row.get("paper_trade_json"), {})
+    pip_plan = row.get("pip_plan") if isinstance(row.get("pip_plan"), dict) else (paper or {}).get("pip_plan")
+    quality = row.get("signal_quality") if isinstance(row.get("signal_quality"), dict) else (paper or {}).get("signal_quality")
+    show_signal = row.get("show_signal")
+    if show_signal is None and quality is not None:
+        show_signal = bool(quality.get("show_signal"))
+    decision = row.get("decision")
+    signal_label = row.get("signal_label") or (quality or {}).get("label") or decision
     return {
         "id": row.get("id"),
         "trade_number": trade_number,
         "trade_label": f"TRADE #{trade_number:06d}",
         "symbol": row.get("symbol"),
         "timeframe": row.get("timeframe"),
-        "decision": row.get("decision"),
+        "decision": decision,
+        "signal_label": signal_label,
+        "show_signal": bool(show_signal) if show_signal is not None else (str(decision).upper() in {"BUY", "SELL"}),
+        "good_trade": bool(row.get("good_trade") if row.get("good_trade") is not None else (quality or {}).get("good_trade")),
+        "signal_quality": quality,
+        "raw_decision": row.get("raw_decision"),
         "technical_score": row.get("technical_score"),
         "ai_confidence": row.get("ai_confidence"),
         "news_score": row.get("news_score"),
@@ -189,8 +202,12 @@ def serialize_decision_row(row: dict[str, Any]) -> dict[str, Any]:
         "tps": row.get("tps") if isinstance(row.get("tps"), list) else _loads(row.get("tps_json"), []),
         "quantity": row.get("quantity"),
         "rr": row.get("rr"),
+        "pip_plan": pip_plan,
+        "consensus": row.get("consensus"),
+        "consensus_reason": row.get("consensus_reason"),
         "paper_status": row.get("paper_status"),
-        "paper_trade": row.get("paper_trade") if isinstance(row.get("paper_trade"), dict) else _loads(row.get("paper_trade_json"), {}),
+        "paper_trade": paper,
+        "how_it_works": row.get("how_it_works"),
         "created_at": row.get("created_at"),
     }
 

@@ -16,6 +16,10 @@ type Decision = {
   symbol: string
   timeframe: string
   decision: string
+  signal_label?: string
+  show_signal?: boolean
+  good_trade?: boolean
+  signal_quality?: { quality_score?: number; reasons?: string[]; label?: string; suppressed?: string }
   technical_score: number
   ai_confidence: number
   news_score: number
@@ -33,6 +37,20 @@ type Decision = {
   paper_status?: string
   created_at?: string
   pine?: { indicators?: IndicatorRow[]; direction?: string }
+  pip_plan?: {
+    message?: string
+    stop_pips?: number
+    tp1_pips?: number
+    tp2_pips?: number
+    entry?: number
+    sl?: number
+    tps?: number[]
+    action?: string
+    instructions?: string[]
+    rr_pips?: number
+  }
+  consensus_reason?: string
+  how_it_works?: string[]
 }
 
 type CommandCenterPayload = {
@@ -302,10 +320,20 @@ export function CommandCenterPage() {
               <div className="uti-symbol">{data?.symbol || symbol}</div>
               <div className="uti-tf">{data?.timeframe || timeframe}M</div>
             </div>
-            <div className={`uti-pill ${biasClass(latest?.decision || data?.confluence?.direction)}`}>
-              {latest?.decision || data?.confluence?.direction || '—'}
+            <div className={`uti-pill ${biasClass(latest?.show_signal ? latest?.decision : 'WAIT')}`}>
+              {latest?.show_signal ? (latest?.signal_label || latest?.decision) : (zh ? '暂无信号' : 'NO SIGNAL')}
             </div>
           </div>
+          {!latest?.show_signal && (
+            <div className="uti-muted" style={{ marginBottom: 10 }}>
+              {zh
+                ? '只在高质量对齐时显示买卖。研究人员在后台运行；冲突或弱信号保持静默。'
+                : 'Signals appear only on high-quality aligned setups. Researchers run quietly until then.'}
+              {latest?.signal_quality?.quality_score != null && (
+                <> · quality {latest.signal_quality.quality_score}/100</>
+              )}
+            </div>
+          )}
           <div className="uti-metrics">
             <div><span>{zh ? '技术分' : 'Technical'}</span><strong>{data?.confluence?.technical_score ?? '—'}/100</strong></div>
             <div><span>{zh ? 'AI 置信' : 'AI Confidence'}</span><strong>{latest?.ai_confidence ?? '—'}/100</strong></div>
@@ -313,6 +341,21 @@ export function CommandCenterPage() {
             <div><span>{zh ? '宏观' : 'Macro'}</span><strong className={biasClass(latest?.macro_bias)}>{latest?.macro_bias || '—'}</strong></div>
             <div><span>{zh ? '风险' : 'Risk'}</span><strong className={biasClass(latest?.risk?.status)}>{latest?.risk?.status || '—'}</strong></div>
           </div>
+          {latest?.show_signal && latest?.pip_plan?.message && (
+            <div className="uti-card" style={{ marginTop: 12, borderColor: '#3d6b4f' }}>
+              <div className="uti-kicker">{zh ? '点差计划 (自动)' : 'Pip plan (auto)'}</div>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>{latest.pip_plan.message}</div>
+              <div className="uti-muted">
+                Stop {latest.pip_plan.stop_pips} pips · TP1 {latest.pip_plan.tp1_pips} · TP2 {latest.pip_plan.tp2_pips}
+                {latest.pip_plan.rr_pips != null ? ` · R:R ${latest.pip_plan.rr_pips}` : ''}
+              </div>
+              <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
+                {(latest.pip_plan.instructions || []).map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </div>
+          )}
         </section>
 
         <section className="uti-panel">
@@ -321,8 +364,8 @@ export function CommandCenterPage() {
             {indicators.map((row) => (
               <div key={row.indicator_id} className="uti-row">
                 <span>{row.name}</span>
-                <span className={biasClass(row.side)}>{row.side}</span>
-                <span>{Math.round((row.strength || 0) * 100)}</span>
+                <span className={biasClass(row.side)}>{row.side === 'MISSING' ? (zh ? '自检中' : 'you check') : row.side}</span>
+                <span>{row.side === 'MISSING' ? '—' : Math.round((row.strength || 0) * 100)}</span>
               </div>
             ))}
           </div>
@@ -330,13 +373,18 @@ export function CommandCenterPage() {
             {zh ? '技术综合分' : 'Technical Score'}{' '}
             <strong>{data?.confluence?.technical_score ?? '—'}/100</strong>
             {!data?.confluence?.ready && (
-              <em>{zh ? '（等待更多同向投票）' : '(waiting for confluence)'}</em>
+              <em>{zh ? '（你自行看盘；AI 研究仍运行）' : '(you read charts; AI research still runs)'}</em>
             )}
           </div>
         </section>
 
         <section className="uti-panel">
-          <h2>{zh ? 'AI 研究' : 'AI Research'}</h2>
+          <h2>{zh ? 'AI 研究 (后台)' : 'AI Research (background)'}</h2>
+          <div className="uti-muted" style={{ marginBottom: 8 }}>
+            {zh
+              ? '这些是研究投票，不是最终信号。只有对齐的高质量交易才显示 BUY/SELL + 点差。'
+              : 'These are research votes, not the trade signal. BUY/SELL + pips only when quality passes.'}
+          </div>
           <div className="uti-analysts">
             {Object.entries(latest?.analysts || {
               technical: { bias: data?.confluence?.direction, score: data?.confluence?.technical_score },
@@ -359,16 +407,12 @@ export function CommandCenterPage() {
             </div>
           </div>
           <div className="uti-metrics compact">
-            <div><span>Trader</span><strong className={biasClass(latest?.trader)}>{latest?.trader || '—'}</strong></div>
-            <div><span>Risk Manager</span><strong className={biasClass(latest?.risk?.status)}>{latest?.risk?.status || '—'}</strong></div>
+            <div><span>{zh ? '信号' : 'Signal'}</span><strong className={biasClass(latest?.show_signal ? latest?.trader : 'WAIT')}>{latest?.show_signal ? (latest?.trader || '—') : 'NO SIGNAL'}</strong></div>
+            <div><span>Risk</span><strong className={biasClass(latest?.risk?.status)}>{latest?.risk?.status || '—'}</strong></div>
           </div>
-          <div className="uti-levels">
-            <div>Entry: {latest?.entry ?? data?.confluence?.entry ?? '—'}</div>
-            <div>Stop Loss: {latest?.sl ?? data?.confluence?.sl ?? '—'}</div>
-            <div>TPs: {(latest?.tps || data?.confluence?.tps || []).join(' / ') || '—'}</div>
-            <div>R:R: {latest?.risk?.rr ?? '—'}</div>
-            <div>Paper: {latest?.paper_status || '—'}</div>
-          </div>
+          {latest?.consensus_reason && (
+            <div className="uti-muted" style={{ marginTop: 8 }}>{latest.consensus_reason}</div>
+          )}
         </section>
       </div>
 
@@ -383,7 +427,8 @@ export function CommandCenterPage() {
                 <span>{d.created_at}</span>
               </div>
               <div className="uti-history-meta">
-                Tech {d.technical_score} · AI {d.ai_confidence} · News {d.news_score} · Risk {d.risk?.status} · Paper {d.paper_status}
+                {d.show_signal ? d.decision : 'NO SIGNAL'} · Tech {d.technical_score} · AI {d.ai_confidence} · Paper {d.paper_status}
+                {d.pip_plan?.stop_pips != null && d.show_signal ? ` · SL ${d.pip_plan.stop_pips}p TP ${d.pip_plan.tp1_pips}p` : ''}
               </div>
             </div>
           ))}

@@ -8,6 +8,8 @@ from typing import Any
 
 from uti_agents.kronos_bridge import get_kronos_forecast
 from uti_agents.live_price import get_paper_agent_cash, resolve_entry_price
+from uti_agents.pip_plan import build_pip_plan
+from uti_agents.signal_quality import evaluate_signal_quality
 from uti_agents.trading_brain import get_trading_brain
 from confluence.engine import get_confluence_engine
 from decisions import store
@@ -161,22 +163,53 @@ def run_decision_cycle(
     if decision not in {"BUY", "SELL", "WAIT"}:
         decision = "WAIT"
 
+    # Only show / trade when it's a good setup — otherwise quiet NO SIGNAL
+    quality = evaluate_signal_quality(
+        decision=decision,
+        confluence=confluence,
+        intel=intel,
+        swarm=swarm,
+        kronos=kronos,
+        consensus=brain.get("consensus"),
+        ai_confidence=float(brain.get("ai_confidence") or 0),
+    )
+    raw_decision = decision
+    if not quality.get("good_trade"):
+        decision = "WAIT"
+
     webhook_entry = confluence.get("entry")
     entry, price_meta = resolve_entry_price(symbol_n, float(webhook_entry) if webhook_entry else None)
     sl = confluence.get("sl")
     tps = list(confluence.get("tps") or [])
-    # If SL/TP came with a stale webhook entry, rebuild around live entry
     if entry and webhook_entry and price_meta.get("chosen", "").startswith("live"):
         sl = None
         tps = []
-    # Synthesize SL/TP from live entry when Pine didn't send them
-    if entry and not sl:
-        sl = round(entry * (0.998 if decision == "BUY" else 1.002), 4)
-    if entry and not tps:
-        if decision == "BUY":
-            tps = [round(entry * 1.002, 4), round(entry * 1.004, 4)]
-        elif decision == "SELL":
-            tps = [round(entry * 0.998, 4), round(entry * 0.996, 4)]
+
+    # Pip plan only for good trades; otherwise a quiet "no signal" plan
+    pip = build_pip_plan(
+        symbol=symbol_n,
+        decision=decision if quality.get("show_signal") else "WAIT",
+        entry=entry,
+        sl=float(sl) if sl else None,
+        tps=[float(x) for x in tps] if tps else None,
+    )
+    if decision in {"BUY", "SELL"} and quality.get("good_trade") and pip.get("sl"):
+        sl = pip["sl"]
+        tps = pip.get("tps") or tps
+    elif not quality.get("good_trade"):
+        sl = None
+        tps = []
+        pip = {
+            **pip,
+            "action": "NO SIGNAL",
+            "message": "No signal — waiting for an aligned high-quality setup",
+            "instructions": [
+                "Researchers are watching (WorldMonitor / MiroFish / Kronos / Pine).",
+                "A BUY/SELL with pip stop & targets appears only when quality passes.",
+                f"Last raw desk idea was {raw_decision} (suppressed). "
+                f"Quality {quality.get('quality_score')}: {', '.join(quality.get('reasons') or [])}",
+            ],
+        }
 
     agent_id, cash = get_paper_agent_cash()
     risk = get_risk_engine().evaluate(
@@ -190,6 +223,15 @@ def run_decision_cycle(
         geopolitical_risk=str(intel.get("geopolitical_risk") or "LOW"),
         cash=cash,
     )
+    # Never paper-fill suppressed / low-quality signals
+    if not quality.get("good_trade"):
+        risk = {
+            **risk,
+            "approved": False,
+            "status": "NO_SIGNAL",
+            "reasons": ["awaiting_good_trade"] + list(quality.get("reasons") or []),
+            "quantity": 0.0,
+        }
 
     paper = maybe_paper_trade(
         decision=decision,
@@ -201,6 +243,8 @@ def run_decision_cycle(
     if isinstance(paper, dict):
         paper["cash_before"] = cash
         paper["price_meta"] = price_meta
+        paper["pip_plan"] = pip
+        paper["signal_quality"] = quality
         if agent_id:
             paper.setdefault("agent_id", agent_id)
 
@@ -219,7 +263,12 @@ def run_decision_cycle(
     record = {
         "symbol": symbol_n,
         "timeframe": confluence.get("timeframe"),
-        "decision": decision,
+        "decision": decision if quality.get("show_signal") else "WAIT",
+        "signal_label": quality.get("label") or "NO SIGNAL",
+        "show_signal": bool(quality.get("show_signal")),
+        "good_trade": bool(quality.get("good_trade")),
+        "signal_quality": quality,
+        "raw_decision": raw_decision,
         "technical_score": confluence.get("technical_score"),
         "ai_confidence": brain.get("ai_confidence"),
         "news_score": intel.get("news_score"),
@@ -229,13 +278,16 @@ def run_decision_cycle(
         "analysts": brain.get("analysts") or {},
         "bull_research": brain.get("bull_research"),
         "bear_research": brain.get("bear_research"),
-        "trader": decision,
+        "trader": decision if quality.get("show_signal") else "WAIT",
         "risk": risk,
-        "entry": entry,
-        "sl": sl,
-        "tps": tps,
-        "quantity": risk.get("quantity"),
-        "rr": risk.get("rr"),
+        "entry": entry if quality.get("show_signal") else None,
+        "sl": sl if quality.get("show_signal") else None,
+        "tps": tps if quality.get("show_signal") else [],
+        "quantity": risk.get("quantity") if quality.get("show_signal") else 0,
+        "rr": risk.get("rr") if quality.get("show_signal") else None,
+        "pip_plan": pip,
+        "consensus": brain.get("consensus"),
+        "consensus_reason": brain.get("consensus_reason"),
         "paper_status": paper.get("status"),
         "paper_trade": paper,
         "brain_mode": brain.get("mode"),
@@ -248,12 +300,26 @@ def run_decision_cycle(
         "price_meta": price_meta,
         "paper_cash_before": cash,
         "paper_agent_id": agent_id,
+        "how_it_works": [
+            "Pine (optional) = your 5 indicator votes",
+            "WorldMonitor = news + macro",
+            "MiroFish = swarm research",
+            "Kronos = forecast",
+            "Consensus + quality gate = only GOOD trades become BUY/SELL with pip stops",
+            "Otherwise UI stays on NO SIGNAL (no spam)",
+        ],
     }
     saved = store.insert_decision(record)
     return {
         "status": "ok",
         "unified": True,
+        "show_signal": bool(quality.get("show_signal")),
+        "good_trade": bool(quality.get("good_trade")),
+        "signal_label": quality.get("label"),
+        "signal_quality": quality,
         "providers_used": providers_used,
+        "pip_plan": pip,
+        "consensus": brain.get("consensus"),
         "decision": saved,
         "brain": brain,
         "intel": intel,
