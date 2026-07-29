@@ -10,6 +10,7 @@ from uti_agents.kronos_bridge import get_kronos_forecast
 from uti_agents.trading_brain import get_trading_brain
 from confluence.engine import get_confluence_engine
 from decisions import store
+from intel.mirofish import get_mirofish_client
 from intel.symbols import normalize_symbol, normalize_timeframe
 from intel.worldmonitor import get_worldmonitor_client
 from risk.engine import get_risk_engine
@@ -140,8 +141,14 @@ def run_decision_cycle(
 
     symbol_n = confluence["symbol"]
     intel = get_worldmonitor_client().fetch_brief(symbol_n)
+    swarm = get_mirofish_client().fetch_swarm_brief(symbol_n, confluence=confluence, intel=intel)
     kronos = get_kronos_forecast(symbol_n)
-    brain = get_trading_brain().analyze(confluence=confluence, intel=intel, kronos=kronos)
+    brain = get_trading_brain().analyze(
+        confluence=confluence,
+        intel=intel,
+        kronos=kronos,
+        swarm=swarm,
+    )
 
     decision = str(brain.get("trader") or "WAIT").upper()
     if decision not in {"BUY", "SELL", "WAIT"}:
@@ -202,7 +209,15 @@ def run_decision_cycle(
         "paper_trade": paper,
         "brain_mode": brain.get("mode"),
         "intel": intel,
+        "swarm": swarm,
         "kronos": kronos,
     }
     saved = store.insert_decision(record)
-    return {"status": "ok", "decision": saved, "brain": brain, "intel": intel, "confluence": confluence}
+    return {
+        "status": "ok",
+        "decision": saved,
+        "brain": brain,
+        "intel": intel,
+        "swarm": swarm,
+        "confluence": confluence,
+    }

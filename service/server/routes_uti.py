@@ -44,12 +44,28 @@ class DecisionRunRequest(BaseModel):
 def register_uti_routes(app: FastAPI) -> None:
     @app.get("/api/uti/health")
     async def uti_health():
+        from intel.mirofish import get_mirofish_client
+
+        miro = get_mirofish_client().health()
         return {
             "status": "ok",
             "indicators": list(KNOWN_INDICATOR_IDS),
             "paper_only": os.getenv("UTI_PAPER_ONLY", "true"),
             "kronos_enabled": os.getenv("KRONOS_ENABLED", "false"),
             "tradingagents_enabled": os.getenv("TRADINGAGENTS_ENABLED", "false"),
+            "mirofish_enabled": os.getenv("MIROFISH_ENABLED", "false"),
+            "mirofish": miro,
+            "packages": {
+                "tradingagents": os.path.isdir(
+                    os.path.join(os.path.dirname(__file__), "..", "..", "packages", "tradingagents")
+                ),
+                "mirofish": os.path.isdir(
+                    os.path.join(os.path.dirname(__file__), "..", "..", "packages", "mirofish")
+                ),
+                "kronos": os.path.isdir(
+                    os.path.join(os.path.dirname(__file__), "..", "..", "packages", "kronos")
+                ),
+            },
         }
 
     @app.get("/api/uti/indicators")
@@ -178,6 +194,8 @@ def register_uti_routes(app: FastAPI) -> None:
                 "confluence_ttl_seconds": os.getenv("CONFLUENCE_TTL_SECONDS", "900"),
                 "tradingagents_enabled": os.getenv("TRADINGAGENTS_ENABLED", "false"),
                 "kronos_enabled": os.getenv("KRONOS_ENABLED", "false"),
+                "mirofish_enabled": os.getenv("MIROFISH_ENABLED", "false"),
+                "mirofish_api_base_url": os.getenv("MIROFISH_API_BASE_URL", "http://127.0.0.1:5001"),
                 "worldmonitor_configured": bool(os.getenv("WORLDMONITOR_API_KEY", "").strip()),
             },
         }

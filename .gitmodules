@@ -1,3 +1,9 @@
 [submodule "packages/tradingagents"]
 	path = packages/tradingagents
 	url = https://github.com/TauricResearch/TradingAgents.git
+[submodule "packages/mirofish"]
+	path = packages/mirofish
+	url = https://github.com/666ghj/MiroFish.git
+[submodule "packages/kronos"]
+	path = packages/kronos
+	url = https://github.com/shiyu-coder/Kronos.git

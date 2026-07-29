@@ -26,14 +26,20 @@ function LanguageSwitcher() {
     <div className="control-pill-group">
       <button
         type="button"
-        onClick={() => setLanguage('zh')}
+        onClick={() => {
+          setLanguage('zh')
+          localStorage.setItem('ai_trader_language', 'zh')
+        }}
         className={`control-pill ${language === 'zh' ? 'active' : ''}`}
       >
         中文
       </button>
       <button
         type="button"
-        onClick={() => setLanguage('en')}
+        onClick={() => {
+          setLanguage('en')
+          localStorage.setItem('ai_trader_language', 'en')
+        }}
         className={`control-pill ${language === 'en' ? 'active' : ''}`}
       >
         EN

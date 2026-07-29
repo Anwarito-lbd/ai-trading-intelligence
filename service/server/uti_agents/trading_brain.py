@@ -40,17 +40,23 @@ class TradingBrain:
         confluence: dict[str, Any],
         intel: dict[str, Any],
         kronos: dict[str, Any] | None = None,
+        swarm: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         pine_report = build_pine_technical_report(confluence)
         if self.use_tradingagents:
             ta_result = self._try_tradingagents(confluence, intel)
             if ta_result is not None:
                 ta_result["pine_report"] = pine_report
+                if swarm:
+                    ta_result.setdefault("analysts", {})["swarm"] = {
+                        "bias": swarm.get("bias"),
+                        "score": swarm.get("score"),
+                    }
                 ta_result["mode"] = "tradingagents"
                 return ta_result
             logger.warning("TradingAgents enabled but unavailable; falling back to heuristic brain")
 
-        return self._heuristic(confluence, intel, kronos, pine_report)
+        return self._heuristic(confluence, intel, kronos, pine_report, swarm)
 
     def _try_tradingagents(self, confluence: dict[str, Any], intel: dict[str, Any]) -> dict[str, Any] | None:
         if _PACKAGES_ROOT.exists() and str(_PACKAGES_ROOT) not in sys.path:
@@ -108,6 +114,7 @@ class TradingBrain:
         intel: dict[str, Any],
         kronos: dict[str, Any] | None,
         pine_report: dict[str, Any],
+        swarm: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         tech = float(confluence.get("technical_score") or 50)
         news = float(intel.get("news_score") or 0.0)
@@ -126,8 +133,18 @@ class TradingBrain:
             kronos_bias = str(kronos.get("bias") or "NEUTRAL").upper()
             kronos_score = float(kronos.get("score") or 50)
 
-        # Bull / bear debate scores
-        bull = 0.45 * tech + 0.2 * news_score + 0.15 * sentiment_score + 0.1 * macro_score + 0.1 * kronos_score
+        swarm_bias = str((swarm or {}).get("bias") or "NEUTRAL").upper()
+        swarm_score = float((swarm or {}).get("score") or 50.0)
+
+        # Bull / bear debate scores (include MiroFish swarm)
+        bull = (
+            0.40 * tech
+            + 0.15 * news_score
+            + 0.10 * sentiment_score
+            + 0.10 * macro_score
+            + 0.10 * kronos_score
+            + 0.15 * swarm_score
+        )
         bear = 100 - bull
         # Debate rounds nudge
         for _ in range(max(1, self.max_debate_rounds)):
@@ -140,6 +157,10 @@ class TradingBrain:
             if news > 0.2:
                 bull += 1.0
             if news < -0.2:
+                bear += 1.0
+            if swarm_bias == "BULLISH":
+                bull += 1.0
+            if swarm_bias == "BEARISH":
                 bear += 1.0
         bull = _clamp(bull)
         bear = _clamp(bear)
@@ -172,12 +193,19 @@ class TradingBrain:
                 "sentiment": {"bias": sentiment_bias, "score": round(sentiment_score, 2)},
                 "macro": {"bias": macro_bias, "score": round(macro_score, 2)},
                 "kronos": {"bias": kronos_bias, "score": round(kronos_score, 2), "enabled": bool(kronos and not kronos.get("disabled"))},
+                "swarm": {
+                    "bias": swarm_bias,
+                    "score": round(swarm_score, 2),
+                    "enabled": bool(swarm and not swarm.get("stub")),
+                    "source": (swarm or {}).get("source"),
+                },
             },
             "bull_research": round(bull, 2),
             "bear_research": round(bear, 2),
             "trader": trader,
             "ai_confidence": round(ai_confidence, 2),
-            "notes": "Local multi-agent heuristic (TradingAgents graph optional via TRADINGAGENTS_ENABLED)",
+            "notes": "Local multi-agent heuristic (TradingAgents/MiroFish/Kronos optional)",
+            "swarm": swarm,
         }
 
 
