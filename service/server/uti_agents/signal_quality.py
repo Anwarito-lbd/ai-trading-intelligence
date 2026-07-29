@@ -1,6 +1,7 @@
 """Only emit actionable BUY/SELL when the setup is high quality.
 
-Weak / conflicting / research-only noise stays WAIT (no signal shown).
+Weak / conflicting noise stays WAIT (no signal shown).
+Pine/TradingView is NOT part of the score — you confirm indicators yourself.
 """
 
 from __future__ import annotations
@@ -51,6 +52,7 @@ def evaluate_signal_quality(
             "decision": "WAIT",
         }
 
+    # Pine is optional — you check TradingView yourself. Only enforce if explicitly required.
     pine_ready = bool(confluence.get("ready"))
     if require_pine and not pine_ready:
         return {
@@ -64,13 +66,13 @@ def evaluate_signal_quality(
 
     # Confidence
     if ai_confidence >= min_conf:
-        score += 25
+        score += 30
     else:
         reasons.append(f"confidence<{min_conf}")
 
-    # Consensus alignment
+    # Consensus alignment (WorldMonitor + MiroFish + Kronos)
     if not consensus.get("conflict") and consensus.get("action") == decision_u:
-        score += 25
+        score += 30
     elif consensus.get("action") == "WAIT":
         reasons.append("consensus_wait")
     else:
@@ -115,13 +117,9 @@ def evaluate_signal_quality(
     else:
         score += 10
 
-    # Pine bonus
+    # Pine does NOT affect score (TV confirmation is manual). Optional tiny bonus only if webhook present.
     if pine_ready and confluence.get("direction") == decision_u:
-        score += 15
-    elif not pine_ready:
-        # Research-only: harder bar
-        score -= 5
-        reasons.append("research_only_no_pine")
+        score += 5
 
     score = max(0.0, min(100.0, score))
     good = score >= min_quality and not reasons.count("consensus_wait")

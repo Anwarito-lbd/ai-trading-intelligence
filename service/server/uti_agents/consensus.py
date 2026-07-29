@@ -1,15 +1,18 @@
 """Consensus gate: stop BUY/SELL when researchers disagree.
 
 Pipeline roles (one desk, one decision):
-  1. Pine confluence     → technical vote (optional until webhooks)
-  2. WorldMonitor        → news / macro / geo
-  3. MiroFish swarm      → multi-persona crowd
-  4. Kronos              → K-line forecast
-  5. Final trader (LLM)  → must respect majority; WAIT on conflict
+  1. WorldMonitor        → news / macro / geo
+  2. MiroFish swarm      → multi-persona crowd
+  3. Kronos              → K-line forecast
+  4. Final trader (LLM)  → must respect majority; WAIT on conflict
+
+Pine/TradingView confluence is optional and does NOT vote by default —
+you confirm indicators yourself on TV before taking a trade.
 """
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 
@@ -34,21 +37,19 @@ def build_consensus(
     pine_ready = bool(confluence.get("ready"))
     pine_dir = str(confluence.get("direction") or "NEUTRAL").upper()
     tech = float(confluence.get("technical_score") or 50)
-    if pine_ready and pine_dir in {"BUY", "SELL"}:
+    # Only count Pine when webhooks are live AND explicitly enabled.
+    use_pine_vote = os.getenv("UTI_CONSENSUS_USE_PINE", "false").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+    if use_pine_vote and pine_ready and pine_dir in {"BUY", "SELL"}:
         votes.append(
             {
                 "role": "pine",
                 "bias": "BULLISH" if pine_dir == "BUY" else "BEARISH",
-                "weight": 2.0,
+                "weight": 1.0,
                 "detail": f"confluence {tech}/100",
             }
         )
-    elif tech >= 60:
-        votes.append({"role": "pine", "bias": "BULLISH", "weight": 0.5, "detail": f"soft tech {tech}"})
-    elif tech <= 40:
-        votes.append({"role": "pine", "bias": "BEARISH", "weight": 0.5, "detail": f"soft tech {tech}"})
-    else:
-        votes.append({"role": "pine", "bias": "NEUTRAL", "weight": 0.0, "detail": "indicators missing / neutral"})
 
     macro = _bias_side(str(intel.get("macro_bias")))
     news = float(intel.get("news_score") or 0)
@@ -117,15 +118,14 @@ def build_consensus(
         action = "BUY" if majority == "BULLISH" else "SELL"
         reason = f"Aligned {majority} (bull={bull_w:.1f} bear={bear_w:.1f})"
 
-    # Without Pine confluence, only trade if at least 2 research votes agree and no conflict
-    if not pine_ready and action in {"BUY", "SELL"}:
+    # Need at least 2 research agents agreeing before BUY/SELL
+    if action in {"BUY", "SELL"}:
         agreeing = sum(1 for v in active if v["bias"] == majority)
-        if agreeing < 2 or conflict:
+        if agreeing < 2:
             action = "WAIT"
-            conflict = True
+            conflict = False
             reason = (
-                f"Research-only mode (Pine MISSING): need ≥2 aligned researchers without conflict. "
-                f"{reason}"
+                f"Need ≥2 aligned researchers (got {agreeing}). {reason}"
             )
 
     return {
@@ -137,7 +137,7 @@ def build_consensus(
         "action": action,
         "reason": reason,
         "pine_ready": pine_ready,
-        "research_mode": not pine_ready,
+        "research_mode": True,
     }
 
 
