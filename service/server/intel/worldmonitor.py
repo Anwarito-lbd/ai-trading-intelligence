@@ -45,11 +45,36 @@ class WorldMonitorClient:
         # Always part of the unified pipeline — try SDK → MCP → live free fallback.
         sdk_brief = self._try_sdk(symbol)
         if sdk_brief is not None:
-            return sdk_brief
+            return self._merge_free_news(symbol, sdk_brief)
         mcp_brief = self._try_mcp(symbol)
         if mcp_brief is not None:
-            return mcp_brief
-        return self._live_fallback(symbol)
+            return self._merge_free_news(symbol, mcp_brief)
+        return self._merge_free_news(symbol, self._live_fallback(symbol))
+
+    def _merge_free_news(self, symbol: str, brief: dict[str, Any]) -> dict[str, Any]:
+        """Layer free RSS/Finnhub/NewsAPI on top of WorldMonitor / fallback."""
+        try:
+            from intel.free_news import enrich_news
+
+            extra = enrich_news(symbol, existing=list(brief.get("headlines") or []))
+            headlines = extra.get("headlines") or brief.get("headlines") or []
+            # Blend scores: keep WM/price signal, nudge with headline sentiment
+            base = float(brief.get("news_score") or 0)
+            blended = max(-1.0, min(1.0, 0.55 * base + 0.45 * float(extra.get("news_score") or 0)))
+            macro = brief.get("macro_bias") or "NEUTRAL"
+            if macro == "NEUTRAL":
+                macro = extra.get("macro_bias") or macro
+            out = dict(brief)
+            out["headlines"] = headlines[:12]
+            out["news_score"] = round(blended, 4)
+            out["macro_bias"] = macro
+            out["free_news"] = {"sources": extra.get("sources"), "count": extra.get("count")}
+            out["stub"] = False
+            out["integrated"] = True
+            return out
+        except Exception as exc:
+            logger.info("free news merge skipped: %s", exc)
+            return brief
 
     def _try_mcp(self, symbol: str) -> dict[str, Any] | None:
         """Best-effort MCP tools/call against worldmonitor.app/mcp (keyed or public)."""
