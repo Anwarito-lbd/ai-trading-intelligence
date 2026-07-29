@@ -51,6 +51,7 @@ def register_uti_routes(app: FastAPI) -> None:
             "status": "ok",
             "indicators": list(KNOWN_INDICATOR_IDS),
             "paper_only": os.getenv("UTI_PAPER_ONLY", "true"),
+            "paper_starting_cash": os.getenv("UTI_PAPER_STARTING_CASH", "100"),
             "kronos_enabled": os.getenv("KRONOS_ENABLED", "false"),
             "tradingagents_enabled": os.getenv("TRADINGAGENTS_ENABLED", "false"),
             "mirofish_enabled": os.getenv("MIROFISH_ENABLED", "false"),
@@ -66,6 +67,59 @@ def register_uti_routes(app: FastAPI) -> None:
                     os.path.join(os.path.dirname(__file__), "..", "..", "packages", "kronos")
                 ),
             },
+        }
+
+    @app.get("/api/uti/webhooks/setup")
+    async def uti_webhook_setup(request: Request, public_base: Optional[str] = None):
+        """TradingView Pro webhook URLs + JSON alert bodies for all 5 Pine indicators."""
+        secret = os.getenv("UTI_WEBHOOK_SECRET", "dev-webhook-secret")
+        base = (public_base or str(request.base_url)).rstrip("/")
+        # Prefer X-Forwarded headers when behind ngrok/tunnel
+        xf_proto = request.headers.get("x-forwarded-proto")
+        xf_host = request.headers.get("x-forwarded-host") or request.headers.get("host")
+        if public_base:
+            base = public_base.rstrip("/")
+        elif xf_host:
+            proto = xf_proto or "https"
+            base = f"{proto}://{xf_host}".rstrip("/")
+
+        webhooks = []
+        for iid, meta in INDICATORS.items():
+            url = f"{base}/api/webhooks/pine/{iid}?secret={secret}"
+            message = (
+                '{"indicator_id":"'
+                + iid
+                + '","symbol":"{{ticker}}","timeframe":"{{interval}}",'
+                '"side":"BUY","strength":0.85,"entry":{{close}},"sl":0,"tps":[],'
+                '"bar_time":"{{timenow}}"}'
+            )
+            webhooks.append(
+                {
+                    "indicator_id": iid,
+                    "name": meta.get("name") if isinstance(meta, dict) else iid,
+                    "webhook_url": url,
+                    "alert_message_buy": message,
+                    "alert_message_sell": message.replace('"side":"BUY"', '"side":"SELL"'),
+                }
+            )
+        from uti_agents.live_price import fetch_live_price, get_paper_agent_cash
+
+        agent_id, cash = get_paper_agent_cash()
+        return {
+            "tradingview_pro_required": True,
+            "instructions": [
+                "1. Expose this API with ngrok: ngrok http 8000",
+                "2. Open GET /api/uti/webhooks/setup?public_base=https://YOUR_NGROK_HOST",
+                "3. On TradingView Pro: create ONE alert per Pine script (5 total)",
+                "4. Paste webhook_url + alert_message into each alert",
+                "5. When >=3 indicators agree, the unified agent desk auto-decides and paper-trades",
+            ],
+            "secret_header_alt": "X-UTI-Secret",
+            "webhooks": webhooks,
+            "paper_agent_id": agent_id,
+            "paper_cash": cash,
+            "live_xauusd": fetch_live_price("XAUUSD"),
+            "mode": "paper" if os.getenv("UTI_PAPER_ONLY", "true").lower() in {"1", "true", "yes", "on"} else "live",
         }
 
     @app.get("/api/uti/indicators")
@@ -163,12 +217,18 @@ def register_uti_routes(app: FastAPI) -> None:
 
     @app.get("/api/uti/command-center")
     async def uti_command_center(symbol: Optional[str] = "XAUUSD", timeframe: Optional[str] = "15"):
+        from intel.worldmonitor import get_worldmonitor_client
+        from uti_agents.live_price import fetch_live_price, get_paper_agent_cash
+
         symbol_n = normalize_symbol(symbol or "XAUUSD")
         tf_n = normalize_timeframe(timeframe or "15")
         votes = store.list_recent_votes(symbol=symbol_n, timeframe=tf_n, limit=200)
         confluence = get_confluence_engine().score(votes, symbol=symbol_n, timeframe=tf_n)
         decisions = store.list_decisions(limit=20, symbol=symbol_n)
         latest = decisions[0] if decisions else None
+        agent_id, cash = get_paper_agent_cash()
+        intel = get_worldmonitor_client().fetch_brief(symbol_n)
+        live = fetch_live_price(symbol_n)
         return {
             "symbol": symbol_n,
             "timeframe": tf_n,
@@ -176,6 +236,15 @@ def register_uti_routes(app: FastAPI) -> None:
             "latest_decision": latest,
             "decisions": decisions,
             "settings": store.get_settings(),
+            "worldmonitor": intel,
+            "live_price": live,
+            "paper": {
+                "agent_id": agent_id,
+                "cash": cash,
+                "starting_cash": float(os.getenv("UTI_PAPER_STARTING_CASH", "100")),
+                "paper_only": os.getenv("UTI_PAPER_ONLY", "true"),
+            },
+            "webhook_setup": "/api/uti/webhooks/setup",
         }
 
     @app.get("/api/uti/settings")

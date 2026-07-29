@@ -51,6 +51,17 @@ type CommandCenterPayload = {
   }
   latest_decision: Decision | null
   decisions: Decision[]
+  worldmonitor?: {
+    source?: string
+    news_score?: number
+    macro_bias?: string
+    geopolitical_risk?: string
+    headlines?: string[]
+    price_change_pct?: number
+  }
+  live_price?: { price?: number; yf_symbol?: string; asof?: string; source?: string }
+  paper?: { agent_id?: number; cash?: number; starting_cash?: number; paper_only?: string }
+  webhook_setup?: string
 }
 
 function biasClass(side?: string) {
@@ -198,6 +209,50 @@ export function CommandCenterPage() {
 
       {error && <div className="uti-banner error">{error}</div>}
       {toast && <div className="uti-banner ok">{toast}</div>}
+
+      <div className="uti-grid" style={{ marginBottom: 16 }}>
+        <div className="uti-card">
+          <div className="uti-kicker">{zh ? '实盘报价' : 'Live price'}</div>
+          <div style={{ fontSize: 28, fontWeight: 700 }}>
+            {data?.live_price?.price != null ? `$${Number(data.live_price.price).toLocaleString()}` : '—'}
+          </div>
+          <div className="uti-muted">
+            {data?.live_price?.yf_symbol || symbol} · {data?.live_price?.source || 'pending'}
+          </div>
+        </div>
+        <div className="uti-card">
+          <div className="uti-kicker">{zh ? '纸面资金' : 'Paper balance'}</div>
+          <div style={{ fontSize: 28, fontWeight: 700 }}>
+            ${Number(data?.paper?.cash ?? 100).toFixed(2)}
+          </div>
+          <div className="uti-muted">
+            {zh ? '起始' : 'Start'} ${Number(data?.paper?.starting_cash ?? 100).toFixed(0)} · agent #{data?.paper?.agent_id ?? '—'}
+          </div>
+        </div>
+        <div className="uti-card">
+          <div className="uti-kicker">WorldMonitor</div>
+          <div className={biasClass(data?.worldmonitor?.macro_bias)} style={{ fontSize: 22, fontWeight: 700 }}>
+            {data?.worldmonitor?.macro_bias || '—'}
+          </div>
+          <div className="uti-muted">
+            news {data?.worldmonitor?.news_score ?? '—'} · geo {data?.worldmonitor?.geopolitical_risk || '—'}
+          </div>
+          <div className="uti-muted" style={{ marginTop: 6 }}>
+            {(data?.worldmonitor?.headlines || []).slice(0, 2).join(' · ') || (zh ? '暂无头条' : 'No headlines yet')}
+          </div>
+        </div>
+        <div className="uti-card">
+          <div className="uti-kicker">TradingView Pro</div>
+          <div style={{ fontSize: 14, lineHeight: 1.45 }}>
+            {zh
+              ? '用 ngrok 暴露 :8000，然后打开 webhook 配置拿 5 条告警 URL。'
+              : 'Tunnel :8000 with ngrok, then open webhook setup for all 5 alert URLs.'}
+          </div>
+          <a href={`${API_BASE}/uti/webhooks/setup`} target="_blank" rel="noreferrer" style={{ color: 'var(--accent-primary)' }}>
+            {data?.webhook_setup || '/api/uti/webhooks/setup'}
+          </a>
+        </div>
+      </div>
 
       {settingsOpen && (
         <form className="uti-settings" onSubmit={saveSettings}>

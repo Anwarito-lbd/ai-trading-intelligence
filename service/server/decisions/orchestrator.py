@@ -7,6 +7,7 @@ import os
 from typing import Any
 
 from uti_agents.kronos_bridge import get_kronos_forecast
+from uti_agents.live_price import get_paper_agent_cash, resolve_entry_price
 from uti_agents.trading_brain import get_trading_brain
 from confluence.engine import get_confluence_engine
 from decisions import store
@@ -154,10 +155,15 @@ def run_decision_cycle(
     if decision not in {"BUY", "SELL", "WAIT"}:
         decision = "WAIT"
 
-    entry = confluence.get("entry")
+    webhook_entry = confluence.get("entry")
+    entry, price_meta = resolve_entry_price(symbol_n, float(webhook_entry) if webhook_entry else None)
     sl = confluence.get("sl")
-    tps = confluence.get("tps") or []
-    # Synthesize SL/TP if missing for paper demos
+    tps = list(confluence.get("tps") or [])
+    # If SL/TP came with a stale webhook entry, rebuild around live entry
+    if entry and webhook_entry and price_meta.get("chosen", "").startswith("live"):
+        sl = None
+        tps = []
+    # Synthesize SL/TP from live entry when Pine didn't send them
     if entry and not sl:
         sl = round(entry * (0.998 if decision == "BUY" else 1.002), 4)
     if entry and not tps:
@@ -166,6 +172,7 @@ def run_decision_cycle(
         elif decision == "SELL":
             tps = [round(entry * 0.998, 4), round(entry * 0.996, 4)]
 
+    agent_id, cash = get_paper_agent_cash()
     risk = get_risk_engine().evaluate(
         decision=decision,
         technical_score=float(confluence.get("technical_score") or 50),
@@ -175,6 +182,7 @@ def run_decision_cycle(
         tps=tps,
         news_score=float(intel.get("news_score") or 0),
         geopolitical_risk=str(intel.get("geopolitical_risk") or "LOW"),
+        cash=cash,
     )
 
     paper = maybe_paper_trade(
@@ -184,6 +192,11 @@ def run_decision_cycle(
         entry=entry,
         quantity=float(risk.get("quantity") or 0),
     )
+    if isinstance(paper, dict):
+        paper["cash_before"] = cash
+        paper["price_meta"] = price_meta
+        if agent_id:
+            paper.setdefault("agent_id", agent_id)
 
     providers_used = brain.get("providers_used") or {
         "pine": True,
@@ -222,6 +235,10 @@ def run_decision_cycle(
         "kronos": kronos,
         "providers_used": providers_used,
         "unified": True,
+        "live_price": (price_meta or {}).get("live"),
+        "price_meta": price_meta,
+        "paper_cash_before": cash,
+        "paper_agent_id": agent_id,
     }
     saved = store.insert_decision(record)
     return {

@@ -3,6 +3,9 @@
 Keep each TradingView indicator as a **separate** chart/alert.
 Do **not** merge the five scripts into one Pine file.
 
+**TradingView Pro setup (webhooks):** see [`pine_wrappers/TRADINGVIEW_SETUP.md`](../pine_wrappers/TRADINGVIEW_SETUP.md)  
+API helper: `GET /api/uti/webhooks/setup`
+
 Original third-party scripts live in gitignored `private/pine/`.
 These wrappers document the **alert message** each chart should send to:
 
@@ -27,11 +30,14 @@ These wrappers document the **alert message** each chart should send to:
   "timeframe": "15",
   "side": "BUY",
   "strength": 0.8,
-  "entry": 3350.2,
-  "sl": 3343.7,
-  "tps": [3357.0, 3364.5],
+  "entry": 4075.2,
+  "sl": 4067.0,
+  "tps": [4083.0, 4091.0],
   "bar_time": "{{timenow}}"
 }
 ```
+
+Use TradingView `{{close}}` so entry is the real chart price. The server also
+cross-checks against live GC=F and overrides stale demo prices.
 
 See each `*.alert.txt` file for TradingView alert message templates.
