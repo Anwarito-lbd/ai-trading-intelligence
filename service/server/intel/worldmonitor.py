@@ -80,11 +80,16 @@ class WorldMonitorClient:
             return brief
 
     def _try_mcp(self, symbol: str) -> dict[str, Any] | None:
-        """Best-effort MCP tools/call against worldmonitor.app/mcp (keyed or public)."""
+        """Best-effort MCP tools/call against worldmonitor.app/mcp (keyed only)."""
+        # Unauthenticated MCP always 401 and burns startup time on Render — skip without a key.
+        if not self.api_key:
+            return None
         mcp_url = os.getenv("WORLDMONITOR_MCP_URL", "https://worldmonitor.app/mcp").rstrip("/")
-        headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
-        if self.api_key:
-            headers["X-WorldMonitor-Key"] = self.api_key
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+            "X-WorldMonitor-Key": self.api_key,
+        }
         yf_sym = SYMBOL_TO_YF.get(symbol, symbol)
         try:
             # Streamable HTTP JSON-RPC style call
@@ -94,7 +99,7 @@ class WorldMonitorClient:
                 "method": "tools/call",
                 "params": {"name": "get_market_data", "arguments": {"symbols": [yf_sym, symbol], "limit": 5}},
             }
-            resp = requests.post(mcp_url, headers=headers, json=payload, timeout=12)
+            resp = requests.post(mcp_url, headers=headers, json=payload, timeout=8)
             if resp.status_code >= 400:
                 logger.info("WM MCP HTTP %s: %s", resp.status_code, resp.text[:200])
                 return None

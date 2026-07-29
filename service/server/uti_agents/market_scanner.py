@@ -112,7 +112,17 @@ def scan_markets(
 
 def _loop() -> None:
     interval = float(os.getenv("UTI_SCAN_INTERVAL_SECONDS", "900"))  # 15 min
-    logger.info("UTI market scanner started interval=%ss symbols=%s", interval, watchlist())
+    # Delay first scan so Render health checks pass before heavy Kronos/LLM work
+    initial_delay = float(os.getenv("UTI_SCAN_INITIAL_DELAY_SECONDS", "45"))
+    logger.info(
+        "UTI market scanner started interval=%ss delay=%ss symbols=%s",
+        interval,
+        initial_delay,
+        watchlist(),
+    )
+    if initial_delay > 0 and _scan_stop.wait(initial_delay):
+        logger.info("UTI market scanner stopped before first scan")
+        return
     while not _scan_stop.is_set():
         try:
             scan_markets(notify=True, paper=False)

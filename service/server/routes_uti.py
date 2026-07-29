@@ -278,33 +278,31 @@ def register_uti_routes(app: FastAPI) -> None:
         }
 
     @app.get("/api/uti/providers")
-    async def uti_providers():
-        """Health of every provider that feeds the unified decision."""
-        from intel.free_market import fetch_free_price
-        from intel.free_news import enrich_news
+    async def uti_providers(sample: bool = False):
+        """Health of every provider that feeds the unified decision.
+
+        Default is lightweight (no Kronos/news sample) so Render health stays snappy.
+        Pass ?sample=true for a full live probe.
+        """
         from intel.llm import ollama_health, provider_status, resolve_llm_provider
         from intel.mirofish import get_mirofish_client
         from intel.worldmonitor import get_worldmonitor_client
-        from uti_agents.kronos_bridge import get_kronos_forecast
 
         wm = get_worldmonitor_client()
         mf = get_mirofish_client()
-        return {
+        out = {
             "unified": True,
             "llm": provider_status(),
             "ollama": ollama_health(),
-            "free_market": {
-                "XAUUSD": fetch_free_price("XAUUSD"),
-                "EURUSD": fetch_free_price("EURUSD"),
-            },
-            "free_news": enrich_news("XAUUSD"),
             "worldmonitor": {
                 "configured": wm.configured,
                 "has_api_key": bool(wm.api_key),
-                "sample": wm.fetch_brief("XAUUSD"),
             },
             "mirofish": mf.health(),
-            "kronos": get_kronos_forecast("XAUUSD"),
+            "kronos": {
+                "enabled": os.getenv("KRONOS_ENABLED", "true"),
+                "model": os.getenv("KRONOS_MODEL", "NeoQuasar/Kronos-mini"),
+            },
             "tradingagents": {
                 "enabled": os.getenv("TRADINGAGENTS_ENABLED", "true"),
                 "full_graph": os.getenv("TRADINGAGENTS_FULL_GRAPH", "true"),
@@ -312,6 +310,19 @@ def register_uti_routes(app: FastAPI) -> None:
                 "prefer_compact_on_groq": os.getenv("UTI_TA_PREFER_COMPACT", "true"),
             },
         }
+        if sample:
+            from intel.free_market import fetch_free_price
+            from intel.free_news import enrich_news
+            from uti_agents.kronos_bridge import get_kronos_forecast
+
+            out["free_market"] = {
+                "XAUUSD": fetch_free_price("XAUUSD"),
+                "EURUSD": fetch_free_price("EURUSD"),
+            }
+            out["free_news"] = enrich_news("XAUUSD")
+            out["worldmonitor"]["sample"] = wm.fetch_brief("XAUUSD")
+            out["kronos"] = get_kronos_forecast("XAUUSD")
+        return out
 
     @app.get("/api/uti/scan/status")
     async def uti_scan_status():

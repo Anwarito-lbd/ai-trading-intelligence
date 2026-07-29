@@ -67,7 +67,9 @@ def _rss_items(url: str, limit: int = 8) -> list[str]:
 
 
 def fetch_gdelt_headlines(symbol: str) -> list[str]:
-    """GDELT DOC API — free, no key."""
+    """GDELT DOC API — free, no key (optional; often slow/blocked on free hosts)."""
+    if os.getenv("UTI_NEWS_GDELT", "false").strip().lower() not in {"1", "true", "yes", "on"}:
+        return []
     query = SYMBOL_QUERY.get(symbol.upper(), symbol).split(" OR ")[0].strip().strip('"')
     try:
         resp = requests.get(
@@ -79,7 +81,7 @@ def fetch_gdelt_headlines(symbol: str) -> list[str]:
                 "format": "json",
                 "sort": "DateDesc",
             },
-            timeout=10,
+            timeout=5,
             headers={"User-Agent": "UTI-NewsBot/1.0"},
         )
         if resp.status_code >= 400:
@@ -93,12 +95,11 @@ def fetch_gdelt_headlines(symbol: str) -> list[str]:
 
 def fetch_rss_headlines(symbol: str) -> list[str]:
     query = SYMBOL_QUERY.get(symbol.upper(), symbol)
+    # Skip hosts that often fail DNS on free PaaS (e.g. feeds.reuters.com on Render)
     feeds = [
         f"https://news.google.com/rss/search?q={quote_plus(query)}&hl=en-US&gl=US&ceid=US:en",
-        "https://feeds.reuters.com/reuters/businessNews",
         "https://www.cnbc.com/id/100003114/device/rss/rss.html",
         "https://feeds.bbci.co.uk/news/business/rss.xml",
-        "https://www.marketwatch.com/rss/topstories",
     ]
     out: list[str] = []
     for url in feeds:
