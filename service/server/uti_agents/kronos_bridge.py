@@ -12,22 +12,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from uti_agents.ticker_map import to_yfinance
+
 logger = logging.getLogger(__name__)
 
 _KRONOS_ROOT = Path(__file__).resolve().parents[3] / "packages" / "kronos"
-_SYMBOL_TO_YF = {
-    "XAUUSD": "GC=F",
-    "XAGUSD": "SI=F",
-    "NAS100": "NQ=F",
-    "NASDAQ": "NQ=F",
-    "US30": "YM=F",
-    "SPX500": "ES=F",
-    "USOIL": "CL=F",
-    "OIL": "CL=F",
-    "EURUSD": "EURUSD=X",
-    "BTCUSD": "BTC-USD",
-    "ETHUSD": "ETH-USD",
-}
 
 _predictor = None
 _predictor_error: str | None = None
@@ -35,14 +24,20 @@ _predictor_error: str | None = None
 
 def _load_predictor():
     global _predictor, _predictor_error
-    if _predictor is not None or _predictor_error:
+    if _predictor is not None:
         return _predictor
+    if _predictor_error and os.getenv("KRONOS_RETRY_LOAD", "false").strip().lower() not in {
+        "1", "true", "yes", "on"
+    }:
+        # Allow one sticky failure unless retry requested; reset on process restart
+        return None
     if not _KRONOS_ROOT.exists():
         _predictor_error = "packages/kronos missing"
         return None
     try:
         if str(_KRONOS_ROOT) not in sys.path:
             sys.path.insert(0, str(_KRONOS_ROOT))
+        import torch  # noqa: F401 — required by Kronos-mini
         from model import Kronos, KronosPredictor, KronosTokenizer
 
         tok_id = os.getenv("KRONOS_TOKENIZER", "NeoQuasar/Kronos-Tokenizer-2k")
@@ -51,6 +46,7 @@ def _load_predictor():
         tokenizer = KronosTokenizer.from_pretrained(tok_id)
         model = Kronos.from_pretrained(model_id)
         _predictor = KronosPredictor(model, tokenizer, max_context=512, device=device)
+        _predictor_error = None
         logger.info("Kronos predictor ready model=%s device=%s", model_id, device)
         return _predictor
     except Exception as exc:
@@ -63,7 +59,7 @@ def _yf_ohlcv(symbol: str, lookback: int = 120):
     import pandas as pd
     import yfinance as yf
 
-    yf_sym = _SYMBOL_TO_YF.get(symbol, symbol)
+    yf_sym = to_yfinance(symbol)
     hist = yf.Ticker(yf_sym).history(period="60d", interval="1h")
     if hist is None or hist.empty or len(hist) < 30:
         hist = yf.Ticker(yf_sym).history(period="6mo", interval="1d")

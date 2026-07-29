@@ -207,7 +207,7 @@ def run_decision_cycle(
             "action": "NO SIGNAL",
             "message": "No signal — waiting for an aligned high-quality setup",
             "instructions": [
-                "Researchers are watching (WorldMonitor / MiroFish / Kronos / Pine).",
+                "Researchers are watching (TradingAgents / WorldMonitor / MiroFish / Kronos).",
                 "A BUY/SELL with pip stop & targets appears only when quality passes.",
                 f"Last raw desk idea was {raw_decision} (suppressed). "
                 f"Quality {quality.get('quality_score')}: {', '.join(quality.get('reasons') or [])}",

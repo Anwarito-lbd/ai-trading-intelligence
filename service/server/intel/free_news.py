@@ -66,12 +66,39 @@ def _rss_items(url: str, limit: int = 8) -> list[str]:
         return []
 
 
+def fetch_gdelt_headlines(symbol: str) -> list[str]:
+    """GDELT DOC API — free, no key."""
+    query = SYMBOL_QUERY.get(symbol.upper(), symbol).split(" OR ")[0].strip().strip('"')
+    try:
+        resp = requests.get(
+            "https://api.gdeltproject.org/api/v2/doc/doc",
+            params={
+                "query": query,
+                "mode": "ArtList",
+                "maxrecords": 8,
+                "format": "json",
+                "sort": "DateDesc",
+            },
+            timeout=10,
+            headers={"User-Agent": "UTI-NewsBot/1.0"},
+        )
+        if resp.status_code >= 400:
+            return []
+        arts = (resp.json() or {}).get("articles") or []
+        return [str(a.get("title")).strip() for a in arts if a.get("title")]
+    except Exception as exc:
+        logger.info("GDELT skipped: %s", exc)
+        return []
+
+
 def fetch_rss_headlines(symbol: str) -> list[str]:
     query = SYMBOL_QUERY.get(symbol.upper(), symbol)
     feeds = [
         f"https://news.google.com/rss/search?q={quote_plus(query)}&hl=en-US&gl=US&ceid=US:en",
         "https://feeds.reuters.com/reuters/businessNews",
         "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+        "https://feeds.bbci.co.uk/news/business/rss.xml",
+        "https://www.marketwatch.com/rss/topstories",
     ]
     out: list[str] = []
     for url in feeds:
@@ -88,13 +115,28 @@ def fetch_finnhub_news(symbol: str) -> list[str]:
     if not key:
         return []
     # Map to equity-ish tickers where possible
-    ticker = {"XAUUSD": "GLD", "XAGUSD": "SLV", "NAS100": "QQQ", "USOIL": "USO", "EURUSD": "FXE"}.get(
-        symbol.upper(), symbol
-    )
+    ticker = {
+        "XAUUSD": "GLD",
+        "XAGUSD": "SLV",
+        "NAS100": "QQQ",
+        "US30": "DIA",
+        "SPX500": "SPY",
+        "USOIL": "USO",
+        "EURUSD": "FXE",
+    }.get(symbol.upper(), symbol)
     try:
+        from datetime import datetime, timedelta, timezone
+
+        end = datetime.now(timezone.utc).date()
+        start = end - timedelta(days=7)
         resp = requests.get(
             "https://finnhub.io/api/v1/company-news",
-            params={"symbol": ticker, "from": "2026-07-01", "to": "2026-07-29", "token": key},
+            params={
+                "symbol": ticker,
+                "from": start.isoformat(),
+                "to": end.isoformat(),
+                "token": key,
+            },
             timeout=8,
         )
         if resp.status_code >= 400:
@@ -134,6 +176,13 @@ def enrich_news(symbol: str, existing: list[str] | None = None) -> dict[str, Any
     if rss:
         sources_used.append("rss")
         for h in rss:
+            if h not in headlines:
+                headlines.append(h)
+
+    gdelt = fetch_gdelt_headlines(symbol)
+    if gdelt:
+        sources_used.append("gdelt")
+        for h in gdelt:
             if h not in headlines:
                 headlines.append(h)
 

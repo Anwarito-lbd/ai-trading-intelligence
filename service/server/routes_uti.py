@@ -52,9 +52,14 @@ def register_uti_routes(app: FastAPI) -> None:
             "indicators": list(KNOWN_INDICATOR_IDS),
             "paper_only": os.getenv("UTI_PAPER_ONLY", "true"),
             "paper_starting_cash": os.getenv("UTI_PAPER_STARTING_CASH", "100"),
-            "kronos_enabled": os.getenv("KRONOS_ENABLED", "false"),
-            "tradingagents_enabled": os.getenv("TRADINGAGENTS_ENABLED", "false"),
-            "mirofish_enabled": os.getenv("MIROFISH_ENABLED", "false"),
+            "kronos_enabled": os.getenv("KRONOS_ENABLED", "true"),
+            "tradingagents_enabled": os.getenv("TRADINGAGENTS_ENABLED", "true"),
+            "tradingagents_full_graph": os.getenv("TRADINGAGENTS_FULL_GRAPH", "true"),
+            "mirofish_enabled": os.getenv("MIROFISH_ENABLED", "true"),
+            "scan_symbols": os.getenv(
+                "UTI_SCAN_SYMBOLS",
+                "XAUUSD,XAGUSD,NAS100,US30,SPX500,USOIL,EURUSD",
+            ),
             "mirofish": miro,
             "packages": {
                 "tradingagents": os.path.isdir(
@@ -275,7 +280,9 @@ def register_uti_routes(app: FastAPI) -> None:
     @app.get("/api/uti/providers")
     async def uti_providers():
         """Health of every provider that feeds the unified decision."""
-        from intel.llm import ollama_health
+        from intel.free_market import fetch_free_price
+        from intel.free_news import enrich_news
+        from intel.llm import ollama_health, provider_status, resolve_llm_provider
         from intel.mirofish import get_mirofish_client
         from intel.worldmonitor import get_worldmonitor_client
         from uti_agents.kronos_bridge import get_kronos_forecast
@@ -284,7 +291,13 @@ def register_uti_routes(app: FastAPI) -> None:
         mf = get_mirofish_client()
         return {
             "unified": True,
+            "llm": provider_status(),
             "ollama": ollama_health(),
+            "free_market": {
+                "XAUUSD": fetch_free_price("XAUUSD"),
+                "EURUSD": fetch_free_price("EURUSD"),
+            },
+            "free_news": enrich_news("XAUUSD"),
             "worldmonitor": {
                 "configured": wm.configured,
                 "has_api_key": bool(wm.api_key),
@@ -294,8 +307,9 @@ def register_uti_routes(app: FastAPI) -> None:
             "kronos": get_kronos_forecast("XAUUSD"),
             "tradingagents": {
                 "enabled": os.getenv("TRADINGAGENTS_ENABLED", "true"),
-                "full_graph": os.getenv("TRADINGAGENTS_FULL_GRAPH", "false"),
-                "provider": os.getenv("UTI_LLM_PROVIDER", "ollama"),
+                "full_graph": os.getenv("TRADINGAGENTS_FULL_GRAPH", "true"),
+                "provider": resolve_llm_provider(),
+                "prefer_compact_on_groq": os.getenv("UTI_TA_PREFER_COMPACT", "true"),
             },
         }
 

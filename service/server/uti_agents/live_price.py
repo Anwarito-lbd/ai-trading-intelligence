@@ -35,7 +35,16 @@ SYMBOL_TO_YF = {
 
 
 def fetch_live_price(symbol: str) -> dict[str, Any] | None:
-    """Return live mid/last for a UTI symbol, or None."""
+    """Return live mid/last for a UTI symbol, or None (free APIs first)."""
+    try:
+        from intel.free_market import fetch_free_price
+
+        free = fetch_free_price(symbol)
+        if free and free.get("price"):
+            return free
+    except Exception as exc:
+        logger.info("free market price skipped for %s: %s", symbol, exc)
+
     yf_sym = SYMBOL_TO_YF.get(symbol.upper(), symbol)
     try:
         import yfinance as yf

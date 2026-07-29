@@ -11,15 +11,15 @@ services:
     healthCheckPath: /health
     envVars:
       - key: UTI_LLM_PROVIDER
-        value: groq
+        value: auto
       - key: UTI_QUICK_MODEL
         value: llama-3.1-8b-instant
       - key: UTI_DEEP_MODEL
-        value: llama-3.3-70b-versatile
+        value: llama-3.1-8b-instant
       - key: UTI_SCANNER_ENABLED
         value: "true"
       - key: UTI_SCAN_SYMBOLS
-        value: XAUUSD,XAGUSD,NAS100,US30,SPX500,USOIL
+        value: XAUUSD,XAGUSD,NAS100,US30,SPX500,USOIL,EURUSD
       - key: UTI_SCAN_TIMEFRAME
         value: "30"
       - key: UTI_SCAN_INTERVAL_SECONDS
@@ -32,7 +32,39 @@ services:
         value: "true"
       - key: UTI_PAPER_STARTING_CASH
         value: "100"
+      - key: TRADINGAGENTS_ENABLED
+        value: "true"
+      - key: TRADINGAGENTS_FULL_GRAPH
+        value: "true"
+      - key: UTI_TA_ANALYSTS
+        value: market,news
+      - key: UTI_MAX_DEBATE_ROUNDS
+        value: "1"
+      - key: UTI_TA_CACHE_SECONDS
+        value: "1200"
+      - key: UTI_TA_PREFER_COMPACT
+        value: "true"
+      - key: KRONOS_ENABLED
+        value: "true"
+      - key: KRONOS_MODEL
+        value: NeoQuasar/Kronos-mini
+      - key: KRONOS_TOKENIZER
+        value: NeoQuasar/Kronos-Tokenizer-2k
+      - key: KRONOS_DEVICE
+        value: cpu
+      - key: MIROFISH_ENABLED
+        value: "true"
       - key: GROQ_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: CEREBRAS_API_KEY
+        sync: false
+      - key: HF_TOKEN
         sync: false
       - key: TELEGRAM_BOT_TOKEN
         sync: false

@@ -1,6 +1,6 @@
-"""Market scanner: XAUUSD, silver, Nasdaq, oil, EURUSD.
+"""Market scanner for the full UTI watchlist.
 
-Runs the full AI desk (WorldMonitor + MiroFish + Kronos + Ollama consensus).
+Runs TradingAgents + WorldMonitor + MiroFish + Kronos (+ Groq) consensus.
 Only Telegram-notifies on high-quality setups — you confirm on TradingView.
 """
 
@@ -24,6 +24,7 @@ DEFAULT_WATCHLIST = [
     "US30",    # dow jones
     "SPX500",  # S&P 500
     "USOIL",   # WTI crude
+    "EURUSD",  # euro / dollar
 ]
 
 _scan_lock = threading.Lock()

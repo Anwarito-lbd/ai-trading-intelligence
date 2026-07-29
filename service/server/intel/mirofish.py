@@ -72,7 +72,16 @@ class MiroFishClient:
             ("risk_officer", "Risk officer prioritizing capital preservation"),
         ]
 
-        if self.llm_provider in {"ollama", "groq", "openai", "openrouter", "openai_compatible"}:
+        if self.llm_provider in {
+            "ollama",
+            "groq",
+            "gemini",
+            "cerebras",
+            "huggingface",
+            "openai",
+            "openrouter",
+            "openai_compatible",
+        }:
             prompt = (
                 f"Symbol {symbol}. Technical={tech}/100 dir={direction}. "
                 f"WorldMonitor news={news} macro={macro}. "
