@@ -238,15 +238,17 @@ class TradingBrain:
         config["news_article_limit"] = int(os.getenv("UTI_TA_NEWS_LIMIT", "3"))
         config["global_news_article_limit"] = int(os.getenv("UTI_TA_GLOBAL_NEWS_LIMIT", "2"))
         config["global_news_lookback_days"] = int(os.getenv("UTI_TA_NEWS_LOOKBACK_DAYS", "2"))
-        # Futures/FX often lack FRED/fundamentals — keep vendors resilient
-        config["data_vendors"] = {
-            **config.get("data_vendors", {}),
+        # Futures/FX: stick to yfinance. Leave macro on fred only if key present;
+        # otherwise omit so tool routing does not claim a broken yfinance macro vendor.
+        vendors = {
             "core_stock_apis": "yfinance",
             "technical_indicators": "yfinance",
             "fundamental_data": "yfinance",
             "news_data": "yfinance",
-            "macro_data": "yfinance",
         }
+        if os.getenv("FRED_API_KEY", "").strip():
+            vendors["macro_data"] = "fred"
+        config["data_vendors"] = {**config.get("data_vendors", {}), **vendors}
         if provider == "ollama":
             base = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434/v1").rstrip("/")
             if not base.endswith("/v1"):
