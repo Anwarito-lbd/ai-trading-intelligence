@@ -24,6 +24,10 @@ services:
         value: "30"
       - key: UTI_SCAN_INTERVAL_SECONDS
         value: "900"
+      - key: UTI_SIGNAL_MIN_QUALITY
+        value: "60"
+      - key: UTI_SIGNAL_MIN_CONFIDENCE
+        value: "65"
       - key: UTI_PAPER_ONLY
         value: "true"
       - key: UTI_PAPER_STARTING_CASH

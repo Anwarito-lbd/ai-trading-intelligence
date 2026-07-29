@@ -25,7 +25,7 @@ def evaluate_signal_quality(
     score = 0.0
 
     min_conf = float(os.getenv("UTI_SIGNAL_MIN_CONFIDENCE", "65"))
-    min_quality = float(os.getenv("UTI_SIGNAL_MIN_QUALITY", "70"))
+    min_quality = float(os.getenv("UTI_SIGNAL_MIN_QUALITY", "60"))
     require_pine = os.getenv("UTI_SIGNAL_REQUIRE_PINE", "false").strip().lower() in {
         "1", "true", "yes", "on"
     }
