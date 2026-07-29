@@ -1,11 +1,11 @@
-"""Multi-agent trading brain.
+"""Unified multi-agent trading brain.
 
-Uses TradingAgents (vendored under packages/tradingagents) when enabled and
-importable; otherwise runs a local heuristic multi-agent simulator that mirrors
-the same roles (technical/news/sentiment/macro → bull/bear → trader → risk prep).
+Always combines Pine confluence + WorldMonitor intel + MiroFish swarm + Kronos
+into one decision. Optional TradingAgents graph when TRADINGAGENTS_ENABLED=true.
 
-When UTI_LLM_PROVIDER=groq (or openai-compatible), the heuristic pack is refined
-by a live LLM call for the final BUY/SELL/WAIT decision.
+LLM refinement (final trader vote) supports:
+  UTI_LLM_PROVIDER=ollama|groq|openai|openrouter|openai_compatible
+Ollama uses OLLAMA_BASE_URL (default http://127.0.0.1:11434/v1) — no key needed.
 """
 
 from __future__ import annotations
@@ -17,13 +17,19 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import requests
-
+from intel.llm import (
+    chat_completion,
+    llm_endpoint,
+    resolve_deep_model,
+    resolve_llm_provider,
+    resolve_quick_model,
+)
 from uti_agents.pine_analyst import build_pine_technical_report
 
 logger = logging.getLogger(__name__)
 
 _PACKAGES_ROOT = Path(__file__).resolve().parents[3] / "packages" / "tradingagents"
+_LLM_REFINE_PROVIDERS = {"groq", "ollama", "openai", "openrouter", "openai_compatible"}
 
 
 def _clamp(value: float, lo: float = 0.0, hi: float = 100.0) -> float:
@@ -32,34 +38,30 @@ def _clamp(value: float, lo: float = 0.0, hi: float = 100.0) -> float:
 
 def _parse_trader_text(text: str) -> str:
     upper = (text or "").upper()
-    if re.search(r"\bBUY\b|\bLONG\b", upper) and not re.search(r"\bWAIT\b", upper.split("\n")[0]):
-        # Prefer first-line decision tokens
-        first = upper.split("\n")[0]
-        if "WAIT" in first and "BUY" not in first and "SELL" not in first:
-            return "WAIT"
-        if "SELL" in first or "SHORT" in first:
-            return "SELL"
-        if "BUY" in first or "LONG" in first:
-            return "BUY"
+    first = upper.split("\n")[0] if upper else ""
+    if "WAIT" in first and "BUY" not in first and "SELL" not in first:
+        return "WAIT"
+    if re.search(r"\bSELL\b|\bSHORT\b", first):
+        return "SELL"
+    if re.search(r"\bBUY\b|\bLONG\b", first):
+        return "BUY"
     if re.search(r"\bSELL\b|\bSHORT\b", upper):
         return "SELL"
+    if re.search(r"\bBUY\b|\bLONG\b", upper):
+        return "BUY"
     if re.search(r"\bWAIT\b|\bHOLD\b|\bFLAT\b", upper):
         return "WAIT"
-    if "BUY" in upper or "LONG" in upper:
-        return "BUY"
-    if "SELL" in upper or "SHORT" in upper:
-        return "SELL"
     return "WAIT"
 
 
 class TradingBrain:
     def __init__(self) -> None:
-        self.use_tradingagents = os.getenv("TRADINGAGENTS_ENABLED", "false").strip().lower() in {
+        self.use_tradingagents = os.getenv("TRADINGAGENTS_ENABLED", "true").strip().lower() in {
             "1", "true", "yes", "on"
         }
-        self.llm_provider = os.getenv("UTI_LLM_PROVIDER", os.getenv("TRADINGAGENTS_LLM_PROVIDER", "heuristic"))
-        self.deep_model = os.getenv("UTI_DEEP_MODEL", os.getenv("TRADINGAGENTS_DEEP_THINK_LLM", "gpt-5.5"))
-        self.quick_model = os.getenv("UTI_QUICK_MODEL", os.getenv("TRADINGAGENTS_QUICK_THINK_LLM", "gpt-5.4-mini"))
+        self.llm_provider = resolve_llm_provider()
+        self.deep_model = resolve_deep_model(self.llm_provider)
+        self.quick_model = resolve_quick_model(self.llm_provider)
         self.max_debate_rounds = int(os.getenv("UTI_MAX_DEBATE_ROUNDS", "2"))
 
     def analyze(
@@ -71,45 +73,20 @@ class TradingBrain:
         swarm: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         pine_report = build_pine_technical_report(confluence)
-        if self.use_tradingagents:
-            ta_result = self._try_tradingagents(confluence, intel)
+
+        # Prefer full TradingAgents graph when enabled + reachable LLM
+        if self.use_tradingagents and self.llm_provider in _LLM_REFINE_PROVIDERS:
+            ta_result = self._try_tradingagents(confluence, intel, kronos, swarm, pine_report)
             if ta_result is not None:
-                ta_result["pine_report"] = pine_report
-                if swarm:
-                    ta_result.setdefault("analysts", {})["swarm"] = {
-                        "bias": swarm.get("bias"),
-                        "score": swarm.get("score"),
-                    }
-                ta_result["mode"] = "tradingagents"
                 return ta_result
-            logger.warning("TradingAgents enabled but unavailable; falling back to heuristic brain")
+            logger.warning("TradingAgents unavailable; using unified heuristic+LLM desk")
 
         result = self._heuristic(confluence, intel, kronos, pine_report, swarm)
-        if self.llm_provider.lower() in {"groq", "openai", "openrouter", "openai_compatible"}:
-            refined = self._refine_with_llm(result, confluence, intel, swarm)
+        if self.llm_provider in _LLM_REFINE_PROVIDERS:
+            refined = self._refine_with_llm(result, confluence, intel, swarm, kronos)
             if refined is not None:
                 return refined
         return result
-
-    def _llm_endpoint(self) -> tuple[str, str, str] | None:
-        provider = self.llm_provider.lower()
-        if provider == "groq":
-            key = os.getenv("GROQ_API_KEY", "").strip()
-            if not key:
-                return None
-            return ("https://api.groq.com/openai/v1/chat/completions", key, self.quick_model or "llama-3.1-8b-instant")
-        if provider == "openrouter":
-            key = os.getenv("OPENROUTER_API_KEY", "").strip()
-            if not key:
-                return None
-            return ("https://openrouter.ai/api/v1/chat/completions", key, self.quick_model)
-        if provider in {"openai", "openai_compatible"}:
-            key = os.getenv("OPENAI_API_KEY", os.getenv("OPENAI_COMPATIBLE_API_KEY", "")).strip()
-            base = os.getenv("UTI_LLM_BASE_URL", os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")).rstrip("/")
-            if not key and provider == "openai":
-                return None
-            return (f"{base}/chat/completions", key, self.quick_model)
-        return None
 
     def _refine_with_llm(
         self,
@@ -117,72 +94,76 @@ class TradingBrain:
         confluence: dict[str, Any],
         intel: dict[str, Any],
         swarm: dict[str, Any] | None,
+        kronos: dict[str, Any] | None,
     ) -> dict[str, Any] | None:
-        endpoint = self._llm_endpoint()
-        if endpoint is None:
-            logger.info("LLM provider %s configured but no API key/endpoint; keeping heuristic", self.llm_provider)
+        if llm_endpoint(self.llm_provider) is None:
+            logger.info("LLM provider %s not reachable; keeping heuristic", self.llm_provider)
             return None
-        url, api_key, model = endpoint
         prompt = (
             f"Symbol: {confluence.get('symbol')} TF: {confluence.get('timeframe')}\n"
-            f"Technical score: {confluence.get('technical_score')}/100 direction={confluence.get('direction')}\n"
-            f"Indicators: {confluence.get('indicators')}\n"
-            f"News score: {intel.get('news_score')} macro={intel.get('macro_bias')} geo={intel.get('geopolitical_risk')}\n"
-            f"Swarm: {(swarm or {}).get('bias')} score={(swarm or {}).get('score')} stub={(swarm or {}).get('stub')}\n"
-            f"Heuristic trader suggestion: {heuristic.get('trader')} "
-            f"(bull={heuristic.get('bull_research')} bear={heuristic.get('bear_research')})\n"
+            f"Pine technical: {confluence.get('technical_score')}/100 dir={confluence.get('direction')} "
+            f"ready={confluence.get('ready')} votes={confluence.get('vote_count')}\n"
+            f"WorldMonitor: news={intel.get('news_score')} macro={intel.get('macro_bias')} "
+            f"geo={intel.get('geopolitical_risk')} source={intel.get('source')}\n"
+            f"MiroFish swarm: bias={(swarm or {}).get('bias')} score={(swarm or {}).get('score')} "
+            f"source={(swarm or {}).get('source')}\n"
+            f"Kronos: bias={(kronos or {}).get('bias')} score={(kronos or {}).get('score')} "
+            f"chg%={(kronos or {}).get('change_pct')} source={(kronos or {}).get('source')}\n"
+            f"Desk heuristic: trader={heuristic.get('trader')} "
+            f"bull={heuristic.get('bull_research')} bear={heuristic.get('bear_research')}\n"
+            "You are the final trader combining ALL of the above into one paper decision.\n"
             "Return exactly one line: DECISION=<BUY|SELL|WAIT>; CONFIDENCE=<0-100>; REASON=<short>"
         )
-        headers = {"Content-Type": "application/json"}
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
-        try:
-            resp = requests.post(
-                url,
-                headers=headers,
-                json={
-                    "model": model,
-                    "temperature": 0.2,
-                    "max_tokens": 120,
-                    "messages": [
-                        {
-                            "role": "system",
-                            "content": (
-                                "You are the final trader in a paper-trading multi-agent desk. "
-                                "Be conservative. Prefer WAIT when evidence conflicts."
-                            ),
-                        },
-                        {"role": "user", "content": prompt},
-                    ],
+        content = chat_completion(
+            provider=self.llm_provider,
+            model=self.quick_model,
+            temperature=0.2,
+            max_tokens=120,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Unified trading desk final trader. Weigh Pine + WorldMonitor + "
+                        "MiroFish + Kronos together. Prefer WAIT when evidence conflicts."
+                    ),
                 },
-                timeout=float(os.getenv("UTI_LLM_TIMEOUT_SECONDS", "25")),
-            )
-            if resp.status_code >= 400:
-                logger.warning("LLM refine HTTP %s: %s", resp.status_code, resp.text[:300])
-                return None
-            content = (
-                resp.json()
-                .get("choices", [{}])[0]
-                .get("message", {})
-                .get("content", "")
-            )
-            decision = _parse_trader_text(content)
-            conf_match = re.search(r"CONFIDENCE\s*=\s*(\d{1,3})", content or "", re.I)
-            confidence = float(conf_match.group(1)) if conf_match else float(heuristic.get("ai_confidence") or 60)
-            confidence = _clamp(confidence)
-            out = dict(heuristic)
-            out["mode"] = f"heuristic+{self.llm_provider}"
-            out["trader"] = decision
-            out["ai_confidence"] = confidence
-            out["llm_raw"] = content
-            out["llm_model"] = model
-            out["notes"] = f"Heuristic analysts + {self.llm_provider}/{model} final trader"
-            return out
-        except Exception as exc:
-            logger.warning("LLM refine failed: %s", exc)
+                {"role": "user", "content": prompt},
+            ],
+        )
+        if not content:
             return None
+        decision = _parse_trader_text(content)
+        conf_match = re.search(r"CONFIDENCE\s*=\s*(\d{1,3})", content or "", re.I)
+        confidence = float(conf_match.group(1)) if conf_match else float(heuristic.get("ai_confidence") or 60)
+        confidence = _clamp(confidence)
+        out = dict(heuristic)
+        out["mode"] = f"unified+{self.llm_provider}"
+        out["trader"] = decision
+        out["ai_confidence"] = confidence
+        out["llm_raw"] = content
+        out["llm_model"] = self.quick_model
+        out["notes"] = (
+            f"Unified desk (Pine+WM+MiroFish+Kronos) + {self.llm_provider}/{self.quick_model}"
+        )
+        out["providers_used"] = {
+            "pine": True,
+            "worldmonitor": True,
+            "mirofish": True,
+            "kronos": bool(kronos and not kronos.get("disabled")),
+            "llm": self.llm_provider,
+            "tradingagents": False,
+        }
+        return out
 
-    def _try_tradingagents(self, confluence: dict[str, Any], intel: dict[str, Any]) -> dict[str, Any] | None:
+    def _try_tradingagents(
+        self,
+        confluence: dict[str, Any],
+        intel: dict[str, Any],
+        kronos: dict[str, Any] | None,
+        swarm: dict[str, Any] | None,
+        pine_report: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Run TradingAgents graph, then fold UTI intel into the same record."""
         if _PACKAGES_ROOT.exists() and str(_PACKAGES_ROOT) not in sys.path:
             sys.path.append(str(_PACKAGES_ROOT))
         try:
@@ -192,42 +173,64 @@ class TradingBrain:
             logger.info("TradingAgents import failed: %s", exc)
             return None
 
+        # Skip full graph for local tiny models / when explicitly using refine-only
+        if os.getenv("TRADINGAGENTS_FULL_GRAPH", "false").strip().lower() not in {
+            "1", "true", "yes", "on"
+        }:
+            # Default: fold TradingAgents *roles* via heuristic+LLM (faster, same pipeline).
+            # Set TRADINGAGENTS_FULL_GRAPH=true to run the real LangGraph (slow on CPU Ollama).
+            return None
+
         try:
             config = DEFAULT_CONFIG.copy()
-            config["llm_provider"] = self.llm_provider if self.llm_provider != "heuristic" else "openai"
+            provider = self.llm_provider if self.llm_provider != "heuristic" else "ollama"
+            config["llm_provider"] = provider
             config["deep_think_llm"] = self.deep_model
             config["quick_think_llm"] = self.quick_model
             config["max_debate_rounds"] = self.max_debate_rounds
+            if provider == "ollama":
+                base = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434/v1").rstrip("/")
+                if not base.endswith("/v1"):
+                    base = base + "/v1"
+                config["backend_url"] = base
+            elif provider == "groq":
+                config["backend_url"] = "https://api.groq.com/openai/v1"
+
             graph = TradingAgentsGraph(debug=False, config=config)
             symbol = confluence.get("symbol") or "SPY"
-            # TradingAgents expects equity-style tickers; map metals/crypto conservatively.
             ticker = {"XAUUSD": "GC=F", "BTCUSD": "BTC-USD", "ETHUSD": "ETH-USD"}.get(symbol, symbol)
             from datetime import datetime, timezone
 
             trade_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
             _, decision = graph.propagate(ticker, trade_date)
-            decision_text = str(decision).upper()
-            if "BUY" in decision_text or "LONG" in decision_text:
-                trader = "BUY"
-            elif "SELL" in decision_text or "SHORT" in decision_text:
-                trader = "SELL"
-            else:
-                trader = "WAIT"
-            return {
-                "mode": "tradingagents",
-                "provider": config["llm_provider"],
-                "models": {"deep": self.deep_model, "quick": self.quick_model},
-                "analysts": {
-                    "technical": {"bias": confluence.get("direction"), "score": confluence.get("technical_score")},
-                    "news": {"bias": intel.get("macro_bias"), "score": 50 + 40 * float(intel.get("news_score") or 0)},
-                },
-                "bull_research": 70.0,
-                "bear_research": 40.0,
-                "trader": trader,
-                "ai_confidence": 75.0,
-                "raw_decision": decision,
-                "notes": f"TradingAgents decision for {ticker} on {trade_date}",
-            }
+            trader = _parse_trader_text(str(decision))
+
+            # Fold WorldMonitor / MiroFish / Kronos into the same payload
+            base = self._heuristic(confluence, intel, kronos, pine_report, swarm)
+            base.update(
+                {
+                    "mode": f"tradingagents+unified+{provider}",
+                    "provider": provider,
+                    "models": {"deep": self.deep_model, "quick": self.quick_model},
+                    "trader": trader,
+                    "ai_confidence": _clamp(float(base.get("ai_confidence") or 70) + 5),
+                    "raw_decision": decision,
+                    "pine_report": pine_report,
+                    "notes": (
+                        f"TradingAgents({ticker}) + WorldMonitor + MiroFish + Kronos "
+                        f"via {provider}/{self.quick_model}"
+                    ),
+                    "providers_used": {
+                        "pine": True,
+                        "worldmonitor": True,
+                        "mirofish": True,
+                        "kronos": bool(kronos and not kronos.get("disabled")),
+                        "llm": provider,
+                        "tradingagents": True,
+                    },
+                }
+            )
+            return base
         except Exception as exc:
             logger.warning("TradingAgents propagate failed: %s", exc)
             return None
@@ -260,7 +263,6 @@ class TradingBrain:
         swarm_bias = str((swarm or {}).get("bias") or "NEUTRAL").upper()
         swarm_score = float((swarm or {}).get("score") or 50.0)
 
-        # Bull / bear debate scores (include MiroFish swarm)
         bull = (
             0.40 * tech
             + 0.15 * news_score
@@ -270,7 +272,6 @@ class TradingBrain:
             + 0.15 * swarm_score
         )
         bear = 100 - bull
-        # Debate rounds nudge
         for _ in range(max(1, self.max_debate_rounds)):
             if tech >= 60:
                 bull += 1.5
@@ -286,6 +287,10 @@ class TradingBrain:
                 bull += 1.0
             if swarm_bias == "BEARISH":
                 bear += 1.0
+            if kronos_bias == "BULLISH":
+                bull += 0.8
+            if kronos_bias == "BEARISH":
+                bear += 0.8
         bull = _clamp(bull)
         bear = _clamp(bear)
 
@@ -300,23 +305,39 @@ class TradingBrain:
 
         ai_confidence = _clamp(abs(bull - bear) + abs(tech - 50) * 0.5)
 
-        technical_bias = "BULLISH" if tech >= 55 else "BEARISH" if tech <= 45 else "NEUTRAL"
-        news_bias = "BULLISH" if news_score >= 55 else "BEARISH" if news_score <= 45 else "NEUTRAL"
-        sentiment_bias = "BULLISH" if sentiment_score >= 55 else "BEARISH" if sentiment_score <= 45 else "NEUTRAL"
-        macro_bias = "BULLISH" if macro_score >= 55 else "BEARISH" if macro_score <= 45 else "NEUTRAL"
-
         return {
-            "mode": "heuristic",
+            "mode": "unified_heuristic",
             "provider": self.llm_provider,
             "models": {"deep": self.deep_model, "quick": self.quick_model},
             "debate_rounds": self.max_debate_rounds,
             "pine_report": pine_report,
             "analysts": {
-                "technical": {"bias": technical_bias, "score": round(tech, 2)},
-                "news": {"bias": news_bias, "score": round(news_score, 2)},
-                "sentiment": {"bias": sentiment_bias, "score": round(sentiment_score, 2)},
-                "macro": {"bias": macro_bias, "score": round(macro_score, 2)},
-                "kronos": {"bias": kronos_bias, "score": round(kronos_score, 2), "enabled": bool(kronos and not kronos.get("disabled"))},
+                "technical": {
+                    "bias": "BULLISH" if tech >= 55 else "BEARISH" if tech <= 45 else "NEUTRAL",
+                    "score": round(tech, 2),
+                    "source": "pine_confluence",
+                },
+                "news": {
+                    "bias": "BULLISH" if news_score >= 55 else "BEARISH" if news_score <= 45 else "NEUTRAL",
+                    "score": round(news_score, 2),
+                    "source": intel.get("source") or "worldmonitor",
+                },
+                "sentiment": {
+                    "bias": "BULLISH" if sentiment_score >= 55 else "BEARISH" if sentiment_score <= 45 else "NEUTRAL",
+                    "score": round(sentiment_score, 2),
+                    "source": intel.get("source") or "worldmonitor",
+                },
+                "macro": {
+                    "bias": "BULLISH" if macro_score >= 55 else "BEARISH" if macro_score <= 45 else "NEUTRAL",
+                    "score": round(macro_score, 2),
+                    "source": intel.get("source") or "worldmonitor",
+                },
+                "kronos": {
+                    "bias": kronos_bias,
+                    "score": round(kronos_score, 2),
+                    "enabled": bool(kronos and not kronos.get("disabled")),
+                    "source": (kronos or {}).get("source"),
+                },
                 "swarm": {
                     "bias": swarm_bias,
                     "score": round(swarm_score, 2),
@@ -328,8 +349,16 @@ class TradingBrain:
             "bear_research": round(bear, 2),
             "trader": trader,
             "ai_confidence": round(ai_confidence, 2),
-            "notes": "Local multi-agent heuristic (TradingAgents/MiroFish/Kronos optional)",
+            "notes": "Unified multi-agent desk (Pine + WorldMonitor + MiroFish + Kronos)",
             "swarm": swarm,
+            "providers_used": {
+                "pine": True,
+                "worldmonitor": True,
+                "mirofish": True,
+                "kronos": bool(kronos and not kronos.get("disabled")),
+                "llm": self.llm_provider,
+                "tradingagents": False,
+            },
         }
 
 

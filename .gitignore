@@ -136,3 +136,6 @@ change.md
 
 # Private third-party Pine scripts (CC BY-NC-SA / proprietary) — not redistributed
 /private/
+
+# AGPL sidecars (WorldMonitor etc.) — not vendored into MIT tree
+/sidecars/

@@ -185,6 +185,15 @@ def run_decision_cycle(
         quantity=float(risk.get("quantity") or 0),
     )
 
+    providers_used = brain.get("providers_used") or {
+        "pine": True,
+        "worldmonitor": bool(intel) and not intel.get("stub"),
+        "mirofish": bool(swarm) and not swarm.get("stub"),
+        "kronos": bool(kronos) and not kronos.get("disabled"),
+        "llm": brain.get("provider"),
+        "tradingagents": "tradingagents" in str(brain.get("mode") or ""),
+    }
+
     record = {
         "symbol": symbol_n,
         "timeframe": confluence.get("timeframe"),
@@ -211,13 +220,18 @@ def run_decision_cycle(
         "intel": intel,
         "swarm": swarm,
         "kronos": kronos,
+        "providers_used": providers_used,
+        "unified": True,
     }
     saved = store.insert_decision(record)
     return {
         "status": "ok",
+        "unified": True,
+        "providers_used": providers_used,
         "decision": saved,
         "brain": brain,
         "intel": intel,
         "swarm": swarm,
+        "kronos": kronos,
         "confluence": confluence,
     }

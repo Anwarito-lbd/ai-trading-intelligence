@@ -184,19 +184,49 @@ def register_uti_routes(app: FastAPI) -> None:
         return {
             "stored": stored,
             "env": {
-                "llm_provider": os.getenv("UTI_LLM_PROVIDER", "heuristic"),
-                "deep_model": os.getenv("UTI_DEEP_MODEL", "gpt-5.5"),
-                "quick_model": os.getenv("UTI_QUICK_MODEL", "gpt-5.4-mini"),
+                "llm_provider": os.getenv("UTI_LLM_PROVIDER", "ollama"),
+                "deep_model": os.getenv("UTI_DEEP_MODEL", "llama3.2:1b"),
+                "quick_model": os.getenv("UTI_QUICK_MODEL", "llama3.2:1b"),
                 "max_debate_rounds": os.getenv("UTI_MAX_DEBATE_ROUNDS", "2"),
                 "paper_trade_enabled": os.getenv("UTI_PAPER_TRADE_ENABLED", "true"),
                 "kill_switch": os.getenv("UTI_KILL_SWITCH", "false"),
                 "confluence_min_votes": os.getenv("CONFLUENCE_MIN_VOTES", "3"),
                 "confluence_ttl_seconds": os.getenv("CONFLUENCE_TTL_SECONDS", "900"),
-                "tradingagents_enabled": os.getenv("TRADINGAGENTS_ENABLED", "false"),
-                "kronos_enabled": os.getenv("KRONOS_ENABLED", "false"),
-                "mirofish_enabled": os.getenv("MIROFISH_ENABLED", "false"),
+                "tradingagents_enabled": os.getenv("TRADINGAGENTS_ENABLED", "true"),
+                "tradingagents_full_graph": os.getenv("TRADINGAGENTS_FULL_GRAPH", "false"),
+                "kronos_enabled": os.getenv("KRONOS_ENABLED", "true"),
+                "mirofish_enabled": os.getenv("MIROFISH_ENABLED", "true"),
                 "mirofish_api_base_url": os.getenv("MIROFISH_API_BASE_URL", "http://127.0.0.1:5001"),
                 "worldmonitor_configured": bool(os.getenv("WORLDMONITOR_API_KEY", "").strip()),
+                "ollama_base_url": os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434/v1"),
+                "unified_pipeline": True,
+            },
+        }
+
+    @app.get("/api/uti/providers")
+    async def uti_providers():
+        """Health of every provider that feeds the unified decision."""
+        from intel.llm import ollama_health
+        from intel.mirofish import get_mirofish_client
+        from intel.worldmonitor import get_worldmonitor_client
+        from uti_agents.kronos_bridge import get_kronos_forecast
+
+        wm = get_worldmonitor_client()
+        mf = get_mirofish_client()
+        return {
+            "unified": True,
+            "ollama": ollama_health(),
+            "worldmonitor": {
+                "configured": wm.configured,
+                "has_api_key": bool(wm.api_key),
+                "sample": wm.fetch_brief("XAUUSD"),
+            },
+            "mirofish": mf.health(),
+            "kronos": get_kronos_forecast("XAUUSD"),
+            "tradingagents": {
+                "enabled": os.getenv("TRADINGAGENTS_ENABLED", "true"),
+                "full_graph": os.getenv("TRADINGAGENTS_FULL_GRAPH", "false"),
+                "provider": os.getenv("UTI_LLM_PROVIDER", "ollama"),
             },
         }
 

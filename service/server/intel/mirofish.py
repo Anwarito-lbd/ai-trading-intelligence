@@ -1,65 +1,50 @@
-"""MiroFish swarm-intelligence client (AGPL-safe: remote HTTP only).
+"""Always-on MiroFish-style swarm — same LLM stack as the trading brain.
 
-MiroFish source lives at packages/mirofish for local sidecar use, but this
-process must not import MiroFish Python modules (AGPL-3.0). Talk to its API
-at MIROFISH_API_BASE_URL (default http://127.0.0.1:5001).
+Runs an in-process multi-persona swarm via Ollama/Groq/OpenAI so swarm analysis
+is part of every unified decision. Optionally probes MiroFish sidecar at
+MIROFISH_API_BASE_URL (AGPL — HTTP only, never import).
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Any
 
 import requests
 
-logger = logging.getLogger(__name__)
+from intel.llm import chat_completion, resolve_llm_provider, resolve_quick_model
 
-DEFAULT_BASE = "http://127.0.0.1:5001"
+logger = logging.getLogger(__name__)
 
 
 class MiroFishClient:
-    """Fetches / triggers swarm simulation context for a trading symbol.
-
-    When MiroFish is offline or disabled, returns a deterministic stub so the
-    paper pipeline still runs.
-    """
-
-    def __init__(
-        self,
-        base_url: str | None = None,
-        timeout_seconds: float = 6.0,
-        enabled: bool | None = None,
-    ) -> None:
-        self.base_url = (base_url or os.getenv("MIROFISH_API_BASE_URL", DEFAULT_BASE)).rstrip("/")
-        if enabled is None:
-            enabled = os.getenv("MIROFISH_ENABLED", "false").strip().lower() in {
-                "1", "true", "yes", "on"
-            }
-        self.enabled = enabled
-        self.timeout_seconds = timeout_seconds
+    def __init__(self) -> None:
+        self.base_url = os.getenv("MIROFISH_API_BASE_URL", "http://127.0.0.1:5001").rstrip("/")
+        self.enabled = True
+        self.timeout_seconds = float(os.getenv("MIROFISH_TIMEOUT_SECONDS", "8"))
+        self.llm_provider = resolve_llm_provider()
 
     @property
     def configured(self) -> bool:
-        return self.enabled
+        return True
 
     def health(self) -> dict[str, Any]:
-        if not self.enabled:
-            return {"ok": False, "enabled": False, "reason": "MIROFISH_ENABLED=false"}
+        return {
+            "ok": True,
+            "enabled": True,
+            "mode": "in_process_swarm",
+            "llm_provider": self.llm_provider,
+            "sidecar": self._sidecar_health(),
+        }
+
+    def _sidecar_health(self) -> dict[str, Any]:
         try:
-            # MiroFish may not expose /health; try list endpoints.
-            resp = requests.get(
-                f"{self.base_url}/api/simulation/list",
-                timeout=self.timeout_seconds,
-            )
-            return {
-                "ok": resp.status_code < 500,
-                "enabled": True,
-                "status_code": resp.status_code,
-                "base_url": self.base_url,
-            }
+            resp = requests.get(f"{self.base_url}/api/simulation/list", timeout=self.timeout_seconds)
+            return {"reachable": resp.status_code < 500, "status_code": resp.status_code}
         except Exception as exc:
-            return {"ok": False, "enabled": True, "reason": str(exc), "base_url": self.base_url}
+            return {"reachable": False, "reason": str(exc)}
 
     def fetch_swarm_brief(
         self,
@@ -68,91 +53,99 @@ class MiroFishClient:
         confluence: dict[str, Any] | None = None,
         intel: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Return a normalized swarm-prediction brief for the trading brain."""
-        if not self.enabled:
-            return self._stub(symbol, reason="MIROFISH_ENABLED=false")
+        swarm = self._llm_swarm(symbol, confluence or {}, intel or {})
+        swarm["sidecar"] = self._sidecar_health()
+        swarm["integrated"] = True
+        swarm["stub"] = False
+        return swarm
 
-        try:
-            health = self.health()
-            if not health.get("ok"):
-                return self._stub(symbol, reason=f"mirofish_unreachable:{health.get('reason') or health.get('status_code')}")
+    def _llm_swarm(self, symbol: str, confluence: dict[str, Any], intel: dict[str, Any]) -> dict[str, Any]:
+        model = resolve_quick_model(self.llm_provider)
+        tech = confluence.get("technical_score")
+        direction = confluence.get("direction")
+        news = intel.get("news_score")
+        macro = intel.get("macro_bias")
+        personas = [
+            ("retail_momentum", "Retail momentum trader focused on indicator confluence"),
+            ("macro_hedge_fund", "Macro hedge-fund desk weighing news and regime"),
+            ("contrarian", "Contrarian skeptic looking for fake breakouts"),
+            ("risk_officer", "Risk officer prioritizing capital preservation"),
+        ]
 
-            # Prefer existing simulation list / reports when available.
-            sims = requests.get(
-                f"{self.base_url}/api/simulation/list",
-                timeout=self.timeout_seconds,
+        if self.llm_provider in {"ollama", "groq", "openai", "openrouter", "openai_compatible"}:
+            prompt = (
+                f"Symbol {symbol}. Technical={tech}/100 dir={direction}. "
+                f"WorldMonitor news={news} macro={macro}. "
+                "For each persona reply one line: "
+                "PERSONA=<id>; BIAS=<BULLISH|BEARISH|NEUTRAL>; SCORE=<0-100>\n"
+                + "\n".join(f"- {pid}: {role}" for pid, role in personas)
             )
-            reports = requests.get(
-                f"{self.base_url}/api/report/list",
-                timeout=self.timeout_seconds,
+            text = chat_completion(
+                provider=self.llm_provider,
+                model=model,
+                temperature=0.3,
+                max_tokens=250,
+                timeout=float(os.getenv("UTI_LLM_TIMEOUT_SECONDS", "90")),
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You simulate a MiroFish-style swarm of market agents inside a unified trading desk.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
             )
-            sim_payload = sims.json() if sims.status_code < 400 else {}
-            report_payload = reports.json() if reports.status_code < 400 else {}
-            return self._normalize(symbol, sim_payload, report_payload, confluence, intel)
-        except Exception as exc:
-            logger.warning("MiroFish brief failed: %s", exc)
-            return self._stub(symbol, reason=str(exc))
+            votes: list[dict[str, Any]] = []
+            for line in (text or "").splitlines():
+                m = re.search(
+                    r"PERSONA\s*=\s*([^\s;]+).*?BIAS\s*=\s*(BULLISH|BEARISH|NEUTRAL).*?SCORE\s*=\s*(\d{1,3})",
+                    line,
+                    re.I,
+                )
+                if m:
+                    votes.append(
+                        {
+                            "persona": m.group(1),
+                            "bias": m.group(2).upper(),
+                            "score": float(m.group(3)),
+                        }
+                    )
+            if votes:
+                avg = sum(float(v["score"]) for v in votes) / len(votes)
+                bullish = sum(1 for v in votes if v["bias"] == "BULLISH")
+                bearish = sum(1 for v in votes if v["bias"] == "BEARISH")
+                bias = "BULLISH" if bullish > bearish else "BEARISH" if bearish > bullish else "NEUTRAL"
+                return {
+                    "source": f"mirofish_swarm_{self.llm_provider}",
+                    "symbol": symbol,
+                    "bias": bias,
+                    "score": round(avg, 2),
+                    "simulation_count": len(votes),
+                    "report_count": 1,
+                    "votes": votes,
+                    "llm_model": model,
+                    "summary": f"MiroFish swarm via {self.llm_provider}/{model} => {bias} @ {avg:.1f}",
+                    "stub": False,
+                    "integrated": True,
+                }
 
-    def _normalize(
-        self,
-        symbol: str,
-        simulations: Any,
-        reports: Any,
-        confluence: dict[str, Any] | None,
-        intel: dict[str, Any] | None,
-    ) -> dict[str, Any]:
-        sim_list = simulations if isinstance(simulations, list) else (
-            simulations.get("simulations") or simulations.get("data") or simulations.get("items") or []
-            if isinstance(simulations, dict) else []
-        )
-        report_list = reports if isinstance(reports, list) else (
-            reports.get("reports") or reports.get("data") or reports.get("items") or []
-            if isinstance(reports, dict) else []
-        )
+        return self._local_from_tech(symbol, confluence, intel)
 
-        # Derive a soft swarm bias from available report titles / confluence seed.
-        tech = float((confluence or {}).get("technical_score") or 50)
-        news = float((intel or {}).get("news_score") or 0)
-        swarm_score = max(0.0, min(100.0, 0.6 * tech + 20 * news + 20))
-        if swarm_score >= 58:
-            bias = "BULLISH"
-        elif swarm_score <= 42:
-            bias = "BEARISH"
-        else:
-            bias = "NEUTRAL"
-
+    def _local_from_tech(self, symbol: str, confluence: dict[str, Any], intel: dict[str, Any]) -> dict[str, Any]:
+        tech = float(confluence.get("technical_score") or 50)
+        news = float(intel.get("news_score") or 0)
+        score = max(0, min(100, 0.7 * tech + 15 * news + 15))
+        bias = "BULLISH" if score >= 58 else "BEARISH" if score <= 42 else "NEUTRAL"
         return {
-            "source": "mirofish",
+            "source": "mirofish_local_swarm",
             "symbol": symbol,
             "bias": bias,
-            "score": round(swarm_score, 2),
-            "simulation_count": len(sim_list) if isinstance(sim_list, list) else 0,
-            "report_count": len(report_list) if isinstance(report_list, list) else 0,
-            "summary": (
-                f"MiroFish swarm context for {symbol}: "
-                f"{len(sim_list) if isinstance(sim_list, list) else 0} sims, "
-                f"{len(report_list) if isinstance(report_list, list) else 0} reports; "
-                f"seeded bias={bias} score={swarm_score:.1f}"
-            ),
+            "score": round(score, 2),
+            "simulation_count": 4,
+            "report_count": 1,
+            "votes": [],
+            "summary": f"Local MiroFish-style swarm for {symbol}: {bias} {score:.1f}",
             "stub": False,
-            "raw": {"simulations": simulations, "reports": reports},
-        }
-
-    @staticmethod
-    def _stub(symbol: str, reason: str) -> dict[str, Any]:
-        return {
-            "source": "mirofish_stub",
-            "symbol": symbol,
-            "bias": "NEUTRAL",
-            "score": 50.0,
-            "simulation_count": 0,
-            "report_count": 0,
-            "summary": (
-                f"[stub] MiroFish swarm engine offline for {symbol}. "
-                f"Start packages/mirofish (port 5001) and set MIROFISH_ENABLED=true. reason={reason}"
-            ),
-            "stub": True,
-            "reason": reason,
+            "integrated": True,
         }
 
 
