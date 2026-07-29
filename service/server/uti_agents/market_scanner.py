@@ -21,6 +21,8 @@ DEFAULT_WATCHLIST = [
     "XAUUSD",  # gold
     "XAGUSD",  # silver
     "NAS100",  # nasdaq 100
+    "US30",    # dow jones
+    "SPX500",  # S&P 500
     "USOIL",   # WTI crude
 ]
 

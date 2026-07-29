@@ -27,7 +27,7 @@ def _infer_market(symbol: str) -> str:
         return "crypto"
     if symbol in {"XAUUSD", "XAGUSD", "EURUSD", "USOIL"}:
         return "forex"
-    if symbol in {"NAS100", "NASDAQ", "SPY", "QQQ"}:
+    if symbol in {"NAS100", "NASDAQ", "US30", "SPX500", "SPY", "QQQ"}:
         return "us-stock"
     return "us-stock"
 

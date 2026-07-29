@@ -19,7 +19,7 @@ services:
       - key: UTI_SCANNER_ENABLED
         value: "true"
       - key: UTI_SCAN_SYMBOLS
-        value: XAUUSD,XAGUSD,NAS100,USOIL
+        value: XAUUSD,XAGUSD,NAS100,US30,SPX500,USOIL
       - key: UTI_SCAN_TIMEFRAME
         value: "30"
       - key: UTI_SCAN_INTERVAL_SECONDS

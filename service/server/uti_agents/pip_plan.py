@@ -27,6 +27,10 @@ def pip_size(symbol: str) -> float:
         return float(os.getenv("UTI_PIP_SIZE_XAGUSD", "0.01"))
     if sym in {"NAS100", "NASDAQ", "US100"}:
         return float(os.getenv("UTI_PIP_SIZE_NAS100", "1.0"))  # 1.0 index point as "pip"
+    if sym in {"US30", "DJ30", "DOW"}:
+        return float(os.getenv("UTI_PIP_SIZE_US30", "1.0"))
+    if sym in {"SPX500", "SPX", "US500", "SP500"}:
+        return float(os.getenv("UTI_PIP_SIZE_SPX500", "0.1"))
     if sym in {"USOIL", "OIL", "WTI"}:
         return float(os.getenv("UTI_PIP_SIZE_USOIL", "0.01"))
     if "JPY" in sym:

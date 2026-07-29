@@ -25,6 +25,8 @@ SYMBOL_QUERY = {
     "XAUUSD": "gold price OR XAUUSD OR bullion OR \"gold futures\"",
     "XAGUSD": "silver price OR XAGUSD OR \"silver futures\"",
     "NAS100": "Nasdaq OR \"Nasdaq 100\" OR NDX",
+    "US30": "Dow OR \"Dow Jones\" OR DJIA",
+    "SPX500": "\"S&P 500\" OR SPX OR \"S&P500\"",
     "USOIL": "\"crude oil\" OR WTI OR Brent OR \"oil prices\"",
     "EURUSD": "EURUSD OR \"euro dollar\" OR ECB forex",
 }
