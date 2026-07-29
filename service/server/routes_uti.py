@@ -299,6 +299,42 @@ def register_uti_routes(app: FastAPI) -> None:
             },
         }
 
+    @app.get("/api/uti/scan/status")
+    async def uti_scan_status():
+        from uti_agents.market_scanner import scanner_status
+        from uti_agents.telegram_notify import telegram_configured
+
+        return {**scanner_status(), "telegram_ready": telegram_configured()}
+
+    @app.post("/api/uti/scan/run")
+    async def uti_scan_run(
+        symbols: Optional[str] = None,
+        timeframe: Optional[str] = None,
+        notify: bool = True,
+    ):
+        """One-shot scan. Notify-only on good setups (no auto paper fill)."""
+        from uti_agents.market_scanner import scan_markets
+
+        syms = [s.strip().upper() for s in (symbols or "").split(",") if s.strip()] or None
+        return scan_markets(
+            symbols=syms,
+            timeframe=timeframe or "30",
+            notify=notify,
+            paper=False,
+        )
+
+    @app.post("/api/uti/scan/start")
+    async def uti_scan_start():
+        from uti_agents.market_scanner import start_scanner_background
+
+        return start_scanner_background()
+
+    @app.post("/api/uti/scan/stop")
+    async def uti_scan_stop():
+        from uti_agents.market_scanner import stop_scanner_background
+
+        return stop_scanner_background()
+
     @app.put("/api/uti/settings")
     async def uti_put_settings(data: SettingsUpdate):
         updates: dict[str, str] = {}

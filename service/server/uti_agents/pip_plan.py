@@ -25,6 +25,10 @@ def pip_size(symbol: str) -> float:
         return float(os.getenv("UTI_PIP_SIZE_XAUUSD", "0.1"))
     if sym in {"XAGUSD"} or sym.startswith("XAG"):
         return float(os.getenv("UTI_PIP_SIZE_XAGUSD", "0.01"))
+    if sym in {"NAS100", "NASDAQ", "US100"}:
+        return float(os.getenv("UTI_PIP_SIZE_NAS100", "1.0"))  # 1.0 index point as "pip"
+    if sym in {"USOIL", "OIL", "WTI"}:
+        return float(os.getenv("UTI_PIP_SIZE_USOIL", "0.01"))
     if "JPY" in sym:
         return 0.01
     if sym in {"BTCUSD", "ETHUSD"} or sym.endswith("USDT"):

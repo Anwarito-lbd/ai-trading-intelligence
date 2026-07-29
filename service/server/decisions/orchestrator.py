@@ -25,8 +25,10 @@ logger = logging.getLogger(__name__)
 def _infer_market(symbol: str) -> str:
     if symbol in {"BTCUSD", "ETHUSD"} or symbol.endswith("USDT"):
         return "crypto"
-    if symbol in {"XAUUSD"}:
+    if symbol in {"XAUUSD", "XAGUSD", "EURUSD", "USOIL"}:
         return "forex"
+    if symbol in {"NAS100", "NASDAQ", "SPY", "QQQ"}:
+        return "us-stock"
     return "us-stock"
 
 
@@ -126,6 +128,7 @@ def run_decision_cycle(
     symbol: str | None = None,
     timeframe: str | None = None,
     force: bool = False,
+    paper: bool | None = None,
 ) -> dict[str, Any]:
     votes = store.list_recent_votes(symbol=normalize_symbol(symbol) if symbol else None, limit=200)
     if timeframe:
@@ -224,6 +227,7 @@ def run_decision_cycle(
         cash=cash,
     )
     # Never paper-fill suppressed / low-quality signals
+    allow_paper = True if paper is None else bool(paper)
     if not quality.get("good_trade"):
         risk = {
             **risk,
@@ -232,21 +236,29 @@ def run_decision_cycle(
             "reasons": ["awaiting_good_trade"] + list(quality.get("reasons") or []),
             "quantity": 0.0,
         }
+    elif not allow_paper:
+        risk = {
+            **risk,
+            "approved": False,
+            "status": "NOTIFY_ONLY",
+            "reasons": ["scanner_notify_only_confirm_on_tradingview"],
+            "quantity": 0.0,
+        }
 
-    paper = maybe_paper_trade(
+    paper_result = maybe_paper_trade(
         decision=decision,
         risk=risk,
         symbol=symbol_n,
         entry=entry,
         quantity=float(risk.get("quantity") or 0),
     )
-    if isinstance(paper, dict):
-        paper["cash_before"] = cash
-        paper["price_meta"] = price_meta
-        paper["pip_plan"] = pip
-        paper["signal_quality"] = quality
+    if isinstance(paper_result, dict):
+        paper_result["cash_before"] = cash
+        paper_result["price_meta"] = price_meta
+        paper_result["pip_plan"] = pip
+        paper_result["signal_quality"] = quality
         if agent_id:
-            paper.setdefault("agent_id", agent_id)
+            paper_result.setdefault("agent_id", agent_id)
 
     providers_used = brain.get("providers_used") or {}
     providers_used = {
@@ -288,8 +300,8 @@ def run_decision_cycle(
         "pip_plan": pip,
         "consensus": brain.get("consensus"),
         "consensus_reason": brain.get("consensus_reason"),
-        "paper_status": paper.get("status"),
-        "paper_trade": paper,
+        "paper_status": paper_result.get("status"),
+        "paper_trade": paper_result,
         "brain_mode": brain.get("mode"),
         "intel": intel,
         "swarm": swarm,

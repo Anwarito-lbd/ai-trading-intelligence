@@ -17,6 +17,12 @@ logger = logging.getLogger(__name__)
 _KRONOS_ROOT = Path(__file__).resolve().parents[3] / "packages" / "kronos"
 _SYMBOL_TO_YF = {
     "XAUUSD": "GC=F",
+    "XAGUSD": "SI=F",
+    "NAS100": "NQ=F",
+    "NASDAQ": "NQ=F",
+    "USOIL": "CL=F",
+    "OIL": "CL=F",
+    "EURUSD": "EURUSD=X",
     "BTCUSD": "BTC-USD",
     "ETHUSD": "ETH-USD",
 }

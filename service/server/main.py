@@ -90,6 +90,17 @@ async def startup_event():
     # Initialize trending cache
     logger.info("Initializing trending cache...")
     _update_trending_cache()
+
+    # UTI market scanner (Telegram notify-only on good setups)
+    if os.getenv("UTI_SCANNER_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}:
+        try:
+            from uti_agents.market_scanner import start_scanner_background
+
+            started_scan = start_scanner_background()
+            logger.info("UTI scanner: %s", started_scan)
+        except Exception:
+            logger.exception("UTI scanner failed to start")
+
     if not background_tasks_enabled_for_api():
         logger.info(
             "API background tasks disabled. Run `python service/server/worker.py` "
