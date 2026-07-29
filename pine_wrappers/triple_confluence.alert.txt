@@ -1,0 +1,5 @@
+{{plot("longPayload")}}
+{{plot("shortPayload")}}
+
+<!-- Prefer the script's built-in JSON alert() payloads. Example: -->
+{"indicator_id":"triple_confluence","symbol":"{{ticker}}","timeframe":"{{interval}}","side":"BUY","strength":0.85,"entry":{{close}},"sl":0,"tps":[],"bar_time":"{{timenow}}"}

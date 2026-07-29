@@ -1,0 +1,1 @@
+{"indicator_id":"money_algorithm","symbol":"{{ticker}}","timeframe":"{{interval}}","side":"BUY","strength":0.75,"entry":{{close}},"sl":0,"tps":[],"bar_time":"{{timenow}}"}

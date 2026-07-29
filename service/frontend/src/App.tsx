@@ -27,6 +27,7 @@ import {
   LeaderboardPage,
 } from './AppPages'
 import { ChallengePage } from './ChallengePage'
+import { CommandCenterPage } from './CommandCenterPage'
 import { ExperimentAdminPage } from './ExperimentAdminPage'
 import { ResearchExportsPage } from './ResearchExportsPage'
 import { TeamMissionsPage } from './TeamMissionsPage'
@@ -285,6 +286,7 @@ function AppRouter({
             <Route path="/experiments" element={permissionLoading ? permissionLoadingView : canUseExperiments ? <ExperimentAdminPage token={token} /> : <Navigate to="/market" replace />} />
             <Route path="/research-exports" element={permissionLoading ? permissionLoadingView : canUseResearchExports && token ? <ResearchExportsPage token={token} /> : <Navigate to="/market" replace />} />
             <Route path="/financial-events" element={<FinancialEventsPage />} />
+            <Route path="/command-center" element={<CommandCenterPage />} />
             <Route path="/copytrading" element={token ? <CopyTradingPage token={token} /> : <Navigate to="/login" replace />} />
             <Route path="/strategies" element={<StrategiesPage />} />
             <Route path="/discussions" element={<DiscussionsPage />} />

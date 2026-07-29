@@ -133,3 +133,6 @@ change.md
 
 # Local agent config symlink
 .codex
+
+# Private third-party Pine scripts (CC BY-NC-SA / proprietary) — not redistributed
+/private/

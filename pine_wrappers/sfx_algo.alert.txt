@@ -1,0 +1,1 @@
+{"indicator_id":"sfx_algo","symbol":"{{ticker}}","timeframe":"{{interval}}","side":"BUY","strength":0.8,"entry":{{close}},"sl":0,"tps":[],"bar_time":"{{timenow}}"}

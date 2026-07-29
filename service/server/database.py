@@ -1687,6 +1687,77 @@ def init_database():
         ON stock_analysis_snapshots(market, symbol)
     """)
 
+    # ==================== Unified Trading Intelligence ====================
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS uti_pine_votes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            indicator_id TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            timeframe TEXT NOT NULL,
+            side TEXT NOT NULL,
+            strength REAL NOT NULL DEFAULT 0.7,
+            entry REAL,
+            sl REAL,
+            tps_json TEXT,
+            bar_time TEXT,
+            received_at TEXT NOT NULL,
+            dedupe_key TEXT UNIQUE,
+            raw_json TEXT
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS uti_decisions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            trade_number INTEGER NOT NULL UNIQUE,
+            symbol TEXT NOT NULL,
+            timeframe TEXT NOT NULL,
+            decision TEXT NOT NULL,
+            technical_score REAL,
+            ai_confidence REAL,
+            news_score REAL,
+            macro_bias TEXT,
+            geopolitical_risk TEXT,
+            pine_json TEXT,
+            analysts_json TEXT,
+            bull_research REAL,
+            bear_research REAL,
+            trader TEXT,
+            risk_json TEXT,
+            entry REAL,
+            sl REAL,
+            tps_json TEXT,
+            quantity REAL,
+            rr REAL,
+            paper_status TEXT,
+            paper_trade_json TEXT,
+            created_at TEXT NOT NULL
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS uti_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_uti_votes_symbol_tf_received
+        ON uti_pine_votes(symbol, timeframe, received_at DESC)
+    """)
+
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_uti_votes_indicator_received
+        ON uti_pine_votes(indicator_id, received_at DESC)
+    """)
+
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_uti_decisions_symbol_created
+        ON uti_decisions(symbol, created_at DESC)
+    """)
+
     if not using_postgres():
         conn.commit()
     elif previous_autocommit is not None:
