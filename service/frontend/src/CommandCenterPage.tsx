@@ -85,7 +85,7 @@ export function CommandCenterPage() {
   const { language } = useLanguage()
   const zh = language === 'zh'
   const [symbol, setSymbol] = useState('XAUUSD')
-  const [timeframe, setTimeframe] = useState('15')
+  const [timeframe, setTimeframe] = useState('30')
   const [data, setData] = useState<CommandCenterPayload | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [provider, setProvider] = useState('heuristic')

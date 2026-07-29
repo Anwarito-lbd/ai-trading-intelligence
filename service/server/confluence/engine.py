@@ -101,7 +101,7 @@ class ConfluenceEngine:
             tf_n = normalize_timeframe(timeframe)
             fresh = [v for v in fresh if normalize_timeframe(v.get("timeframe")) == tf_n]
         else:
-            tf_n = normalize_timeframe(fresh[0].get("timeframe")) if fresh else "15"
+            tf_n = normalize_timeframe(fresh[0].get("timeframe")) if fresh else "30"
 
         latest = self.latest_per_indicator(fresh)
         rows: list[dict[str, Any]] = []

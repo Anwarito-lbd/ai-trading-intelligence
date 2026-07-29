@@ -138,9 +138,15 @@ def run_decision_cycle(
             "status": "waiting",
             "reason": "confluence_not_ready",
             "confluence": confluence,
+            "hint": "No Pine confluence yet. Open Command Center → Force Decide to run AI research (WorldMonitor + MiroFish + Kronos + Ollama) without webhooks.",
         }
 
-    symbol_n = confluence["symbol"]
+    # Research mode (no webhooks): force=true still runs the full AI desk on live price.
+    symbol_n = normalize_symbol(symbol or confluence.get("symbol") or "XAUUSD")
+    if confluence.get("symbol") in {None, "UNKNOWN"}:
+        confluence["symbol"] = symbol_n
+    if not confluence.get("timeframe"):
+        confluence["timeframe"] = normalize_timeframe(timeframe or "30")
     intel = get_worldmonitor_client().fetch_brief(symbol_n)
     swarm = get_mirofish_client().fetch_swarm_brief(symbol_n, confluence=confluence, intel=intel)
     kronos = get_kronos_forecast(symbol_n)
@@ -198,13 +204,16 @@ def run_decision_cycle(
         if agent_id:
             paper.setdefault("agent_id", agent_id)
 
-    providers_used = brain.get("providers_used") or {
-        "pine": True,
+    providers_used = brain.get("providers_used") or {}
+    providers_used = {
+        **providers_used,
+        "pine": bool(confluence.get("ready") or (confluence.get("active_votes") or 0) > 0),
         "worldmonitor": bool(intel) and not intel.get("stub"),
         "mirofish": bool(swarm) and not swarm.get("stub"),
         "kronos": bool(kronos) and not kronos.get("disabled"),
-        "llm": brain.get("provider"),
+        "llm": brain.get("provider") or providers_used.get("llm"),
         "tradingagents": "tradingagents" in str(brain.get("mode") or ""),
+        "research_mode": not bool(confluence.get("ready")),
     }
 
     record = {

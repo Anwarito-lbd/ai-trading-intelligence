@@ -47,6 +47,6 @@ def normalize_symbol(raw: str | None) -> str:
 
 def normalize_timeframe(raw: str | None) -> str:
     if not raw:
-        return "15"
+        return "30"
     cleaned = str(raw).strip().lower()
     return TIMEFRAME_ALIASES.get(cleaned, str(raw).strip())

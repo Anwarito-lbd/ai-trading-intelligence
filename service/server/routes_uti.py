@@ -216,12 +216,12 @@ def register_uti_routes(app: FastAPI) -> None:
         return row
 
     @app.get("/api/uti/command-center")
-    async def uti_command_center(symbol: Optional[str] = "XAUUSD", timeframe: Optional[str] = "15"):
+    async def uti_command_center(symbol: Optional[str] = "XAUUSD", timeframe: Optional[str] = "30"):
         from intel.worldmonitor import get_worldmonitor_client
         from uti_agents.live_price import fetch_live_price, get_paper_agent_cash
 
         symbol_n = normalize_symbol(symbol or "XAUUSD")
-        tf_n = normalize_timeframe(timeframe or "15")
+        tf_n = normalize_timeframe(timeframe or "30")
         votes = store.list_recent_votes(symbol=symbol_n, timeframe=tf_n, limit=200)
         confluence = get_confluence_engine().score(votes, symbol=symbol_n, timeframe=tf_n)
         decisions = store.list_decisions(limit=20, symbol=symbol_n)
