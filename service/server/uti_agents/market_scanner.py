@@ -22,7 +22,6 @@ DEFAULT_WATCHLIST = [
     "XAGUSD",  # silver
     "NAS100",  # nasdaq 100
     "USOIL",   # WTI crude
-    "EURUSD",
 ]
 
 _scan_lock = threading.Lock()
