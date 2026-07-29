@@ -1224,12 +1224,40 @@ export function LoginPage({ onLogin }: { onLogin: (token: string) => void }) {
       title="AI-Trader"
       subtitle={language === 'zh' ? '登录已有 Agent' : 'Login Existing Agent'}
       footer={
-        <p style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: '14px' }}>
-          {language === 'zh' ? '没有 Agent？' : 'No agent?'}{' '}
-          <Link to="/register" style={{ color: 'var(--accent-primary)' }}>
-            {language === 'zh' ? '立即注册' : 'Register now'}
-          </Link>
-        </p>
+        <div style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: '14px' }}>
+          <p>
+            {language === 'zh' ? '没有 Agent？' : 'No agent?'}{' '}
+            <Link to="/register" style={{ color: 'var(--accent-primary)' }}>
+              {language === 'zh' ? '立即注册' : 'Register now'}
+            </Link>
+          </p>
+          <p style={{ marginTop: 12 }}>
+            <Link to="/command-center" style={{ color: 'var(--accent-primary)' }}>
+              {language === 'zh' ? '跳过登录 → 指挥中心（纸面）' : 'Skip login → Command Center (paper)'}
+            </Link>
+          </p>
+          <div
+            style={{
+              marginTop: 16,
+              padding: 12,
+              borderRadius: 10,
+              background: 'var(--bg-secondary, #121821)',
+              border: '1px solid var(--border-color, #243041)',
+              textAlign: 'left',
+              fontSize: 13,
+              lineHeight: 1.5,
+            }}
+          >
+            <strong>{language === 'zh' ? '本地演示账号' : 'Local demo account'}</strong>
+            <div>Agent name: <code>DemoTrader</code></div>
+            <div>Password: <code>DemoPass123!</code></div>
+            <div style={{ opacity: 0.8, marginTop: 6 }}>
+              {language === 'zh'
+                ? '登录用的是 Agent 名称 + 密码（不是邮箱）。邮箱仅用于注册。'
+                : 'Login uses Agent name + password (not email). Email is only for registration.'}
+            </div>
+          </div>
+        </div>
       }
     >
       <form onSubmit={handleSubmit}>
@@ -1315,12 +1343,19 @@ export function RegisterPage({ onLogin }: { onLogin: (token: string) => void }) 
       title="AI-Trader"
       subtitle={language === 'zh' ? '注册新 Agent' : 'Register New Agent'}
       footer={
-        <p style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: '14px' }}>
-          {language === 'zh' ? '已有 Agent？' : 'Already have an agent?'}{' '}
-          <Link to="/login" style={{ color: 'var(--accent-primary)' }}>
-            {language === 'zh' ? '立即登录' : 'Login now'}
-          </Link>
-        </p>
+        <div style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: '14px' }}>
+          <p>
+            {language === 'zh' ? '已有 Agent？' : 'Already have an agent?'}{' '}
+            <Link to="/login" style={{ color: 'var(--accent-primary)' }}>
+              {language === 'zh' ? '立即登录' : 'Login now'}
+            </Link>
+          </p>
+          <p style={{ marginTop: 12 }}>
+            <Link to="/command-center" style={{ color: 'var(--accent-primary)' }}>
+              {language === 'zh' ? '跳过注册 → 指挥中心（纸面）' : 'Skip register → Command Center (paper)'}
+            </Link>
+          </p>
+        </div>
       }
     >
       <form onSubmit={handleSubmit}>

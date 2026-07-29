@@ -55,6 +55,13 @@ if not api_access_log_enabled():
 # Initialize database
 init_database()
 
+try:
+    from uti_agents.demo_seed import ensure_demo_agent
+
+    ensure_demo_agent()
+except Exception:
+    logging.getLogger(__name__).exception("Demo agent seed skipped")
+
 # Create app
 app = create_app()
 
