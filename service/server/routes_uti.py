@@ -76,10 +76,15 @@ def register_uti_routes(app: FastAPI) -> None:
 
     @app.get("/api/uti/webhooks/setup")
     async def uti_webhook_setup(request: Request, public_base: Optional[str] = None):
-        """TradingView Pro webhook URLs + JSON alert bodies for all 5 Pine indicators."""
+        """TradingView webhook URLs.
+
+        Primary path (recommended): TV indicator → Telegram + current AI status
+        (Pine is NOT merged into the AI desk).
+
+        Legacy path: /api/webhooks/pine/{id} still exists but auto-decide is off by default.
+        """
         secret = os.getenv("UTI_WEBHOOK_SECRET", "dev-webhook-secret")
         base = (public_base or str(request.base_url)).rstrip("/")
-        # Prefer X-Forwarded headers when behind ngrok/tunnel
         xf_proto = request.headers.get("x-forwarded-proto")
         xf_host = request.headers.get("x-forwarded-host") or request.headers.get("host")
         if public_base:
@@ -88,7 +93,43 @@ def register_uti_routes(app: FastAPI) -> None:
             proto = xf_proto or "https"
             base = f"{proto}://{xf_host}".rstrip("/")
 
-        webhooks = []
+        markets = [
+            s.strip()
+            for s in os.getenv(
+                "UTI_SCAN_SYMBOLS",
+                "XAUUSD,XAGUSD,NAS100,US30,SPX500,USOIL,EURUSD",
+            ).split(",")
+            if s.strip()
+        ]
+
+        tv_telegram_webhooks = []
+        for iid, meta in INDICATORS.items():
+            url = f"{base}/api/webhooks/tv-telegram/{iid}?secret={secret}"
+            message = (
+                '{"indicator_id":"'
+                + iid
+                + '","symbol":"{{ticker}}","timeframe":"{{interval}}",'
+                '"side":"BUY","strength":0.85,"entry":{{close}},'
+                '"bar_time":"{{timenow}}","note":"{{strategy.order.comment}}"}'
+            )
+            tv_telegram_webhooks.append(
+                {
+                    "indicator_id": iid,
+                    "name": meta.get("name") if isinstance(meta, dict) else iid,
+                    "webhook_url": url,
+                    "alert_message_buy": message,
+                    "alert_message_sell": message.replace('"side":"BUY"', '"side":"SELL"'),
+                }
+            )
+
+        # One shared URL for any custom indicator name in the JSON body
+        shared_url = f"{base}/api/webhooks/tv-telegram?secret={secret}"
+        shared_message = (
+            '{"indicator_id":"my_indicator","symbol":"{{ticker}}","timeframe":"{{interval}}",'
+            '"side":"BUY","strength":0.85,"entry":{{close}},"bar_time":"{{timenow}}"}'
+        )
+
+        legacy_pine = []
         for iid, meta in INDICATORS.items():
             url = f"{base}/api/webhooks/pine/{iid}?secret={secret}"
             message = (
@@ -98,7 +139,7 @@ def register_uti_routes(app: FastAPI) -> None:
                 '"side":"BUY","strength":0.85,"entry":{{close}},"sl":0,"tps":[],'
                 '"bar_time":"{{timenow}}"}'
             )
-            webhooks.append(
+            legacy_pine.append(
                 {
                     "indicator_id": iid,
                     "name": meta.get("name") if isinstance(meta, dict) else iid,
@@ -107,29 +148,140 @@ def register_uti_routes(app: FastAPI) -> None:
                     "alert_message_sell": message.replace('"side":"BUY"', '"side":"SELL"'),
                 }
             )
+
         from uti_agents.live_price import fetch_live_price, get_paper_agent_cash
 
         agent_id, cash = get_paper_agent_cash()
         return {
             "tradingview_pro_required": True,
+            "scan_markets": markets,
+            "mode": "tv_telegram_separate_from_ai",
             "instructions": [
-                "1. Expose this API with ngrok: ngrok http 8000",
-                "2. Open GET /api/uti/webhooks/setup?public_base=https://YOUR_NGROK_HOST",
-                "3. On TradingView Pro: create ONE alert per Pine script (5 total)",
-                "4. Paste webhook_url + alert_message into each alert",
-                "5. When >=3 indicators agree, the unified agent desk auto-decides and paper-trades",
+                "USE THIS PATH: TradingView alert → /api/webhooks/tv-telegram/... → Telegram",
+                "Pine/TV is NOT merged into the AI decision desk.",
+                "Telegram message = your indicator alert + current AI status for that symbol.",
+                "1. Open this setup URL with public_base=https://uti-trading-intel.onrender.com",
+                "2. On TradingView Pro: create one alert per indicator",
+                "3. Paste webhook_url + alert_message (BUY or SELL template)",
+                "4. AI keeps scanning markets in the background separately",
             ],
             "secret_header_alt": "X-UTI-Secret",
-            "webhooks": webhooks,
+            "tv_telegram": {
+                "shared_webhook_url": shared_url,
+                "shared_alert_message_buy": shared_message,
+                "shared_alert_message_sell": shared_message.replace('"side":"BUY"', '"side":"SELL"'),
+                "per_indicator": tv_telegram_webhooks,
+            },
+            "legacy_pine_confluence_webhooks": legacy_pine,
+            "legacy_note": (
+                "Legacy /api/webhooks/pine/* stores votes for confluence. "
+                "Auto-decide is OFF by default (UTI_AUTO_DECIDE_ON_WEBHOOK=false)."
+            ),
             "paper_agent_id": agent_id,
             "paper_cash": cash,
             "live_xauusd": fetch_live_price("XAUUSD"),
-            "mode": "paper" if os.getenv("UTI_PAPER_ONLY", "true").lower() in {"1", "true", "yes", "on"} else "live",
         }
 
     @app.get("/api/uti/indicators")
     async def uti_indicators():
         return {"indicators": list(INDICATORS.values())}
+
+    async def _parse_webhook_body(request: Request) -> Any:
+        content_type = (request.headers.get("content-type") or "").lower()
+        if "application/json" in content_type:
+            try:
+                return await request.json()
+            except Exception:
+                raw = await request.body()
+                return raw.decode("utf-8", errors="replace")
+        raw = await request.body()
+        return raw.decode("utf-8", errors="replace").strip()
+
+    @app.post("/api/webhooks/tv-telegram")
+    @app.post("/api/webhooks/tv-telegram/{indicator_id}")
+    async def tv_telegram_webhook(
+        request: Request,
+        indicator_id: Optional[str] = None,
+        secret: Optional[str] = None,
+        x_uti_secret: Optional[str] = Header(None, alias="X-UTI-Secret"),
+    ):
+        """TradingView → Telegram only. Does NOT merge Pine into the AI desk."""
+        from confluence.indicators import INDICATORS
+        from uti_agents.tv_telegram import notify_tv_alert
+        from webhooks.adapters import normalize_payload, parse_text_alert
+
+        provided = secret or x_uti_secret or request.query_params.get("secret")
+        if not _webhook_secret_ok(provided):
+            raise HTTPException(status_code=401, detail="Invalid webhook secret")
+
+        body = await _parse_webhook_body(request)
+        # Resolve indicator id from path or body
+        body_dict = body if isinstance(body, dict) else {}
+        iid = (
+            indicator_id
+            or (body_dict.get("indicator_id") if isinstance(body_dict, dict) else None)
+            or "tradingview"
+        )
+        iid = str(iid).strip() or "tradingview"
+
+        # Soft-normalize without requiring known indicator registry
+        received_at = utc_now_iso_z()
+        try:
+            if iid in KNOWN_INDICATOR_IDS:
+                vote = normalize_payload(iid, body, received_at=received_at)
+            else:
+                # Free-form indicator name
+                if isinstance(body, str):
+                    parsed = parse_text_alert(body)
+                    payload = {
+                        "side": parsed["side"],
+                        "strength": parsed["strength"],
+                        "raw_text": body,
+                        "symbol": "XAUUSD",
+                    }
+                else:
+                    payload = dict(body_dict)
+                # Temporarily map through a known id normalizer by injecting fields
+                fake = {
+                    **payload,
+                    "indicator_id": "triple_confluence",
+                }
+                vote = normalize_payload("triple_confluence", fake, received_at=received_at)
+                vote["indicator_id"] = iid
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        name = None
+        if iid in INDICATORS and isinstance(INDICATORS[iid], dict):
+            name = INDICATORS[iid].get("name")
+
+        raw_note = None
+        raw = vote.get("raw") if isinstance(vote.get("raw"), dict) else {}
+        raw_note = (
+            (raw.get("note") if isinstance(raw, dict) else None)
+            or (raw.get("raw_text") if isinstance(raw, dict) else None)
+            or (body if isinstance(body, str) else None)
+        )
+
+        result = notify_tv_alert(
+            indicator_id=iid,
+            indicator_name=name,
+            symbol=vote["symbol"],
+            timeframe=vote["timeframe"],
+            side=vote["side"],
+            entry=vote.get("entry"),
+            strength=vote.get("strength"),
+            raw_note=str(raw_note) if raw_note else None,
+        )
+        return {
+            "success": True,
+            "merged_into_ai": False,
+            "path": "tv_telegram_only",
+            "indicator_id": iid,
+            "symbol": vote["symbol"],
+            "side": vote["side"],
+            "telegram": result,
+        }
 
     @app.post("/api/webhooks/pine/{indicator_id}")
     async def pine_webhook(
@@ -144,17 +296,7 @@ def register_uti_routes(app: FastAPI) -> None:
         if not _webhook_secret_ok(provided):
             raise HTTPException(status_code=401, detail="Invalid webhook secret")
 
-        content_type = (request.headers.get("content-type") or "").lower()
-        if "application/json" in content_type:
-            try:
-                body: Any = await request.json()
-            except Exception:
-                body = await request.body()
-                body = body.decode("utf-8", errors="replace")
-        else:
-            raw = await request.body()
-            text = raw.decode("utf-8", errors="replace").strip()
-            body = text
+        body = await _parse_webhook_body(request)
 
         received_at = utc_now_iso_z()
         try:
@@ -167,7 +309,8 @@ def register_uti_routes(app: FastAPI) -> None:
 
         saved = store.insert_pine_vote(vote)
 
-        auto_run = os.getenv("UTI_AUTO_DECIDE_ON_WEBHOOK", "true").strip().lower() in {
+        # Default OFF — user checks TV separately; use /api/webhooks/tv-telegram for alerts
+        auto_run = os.getenv("UTI_AUTO_DECIDE_ON_WEBHOOK", "false").strip().lower() in {
             "1", "true", "yes", "on"
         }
         decision_result = None
@@ -182,7 +325,9 @@ def register_uti_routes(app: FastAPI) -> None:
             "success": True,
             "deduped": False,
             "vote": saved,
+            "merged_into_ai": bool(auto_run),
             "decision_cycle": decision_result,
+            "hint": "Prefer /api/webhooks/tv-telegram/{indicator_id} for Telegram + AI status without merging.",
         }
 
     @app.get("/api/uti/votes")
