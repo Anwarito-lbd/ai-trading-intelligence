@@ -192,7 +192,7 @@ def fetch_grounded_market_brief(symbol: str) -> dict[str, Any]:
             summary = line.strip()[:240]
             break
         if not summary:
-            summary = (grounded_fallback_summary(text) if False else text[:240])
+            summary = text[:240]
 
     # Soft infer if model skipped the template
     if bias == "NEUTRAL" and abs(news_score) < 1e-9 and text:
