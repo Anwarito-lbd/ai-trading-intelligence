@@ -1,4 +1,5 @@
 # Render Blueprint — free web service (spins down after ~15m idle)
+# TV→Telegram: /api/webhooks/tv-telegram?secret=...
 # Pair with a free cron ping every 10–15 min so the scanner stays alive:
 #   https://cron-job.org → GET/POST https://YOUR-APP.onrender.com/api/uti/scan/run
 services:
