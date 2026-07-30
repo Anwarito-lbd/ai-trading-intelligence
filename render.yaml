@@ -57,6 +57,12 @@ services:
         value: "true"
       - key: UTI_AUTO_DECIDE_ON_WEBHOOK
         value: "false"
+      - key: UTI_GEMINI_SEARCH_GROUNDING
+        value: "true"
+      - key: UTI_SCAN_GROUNDING
+        value: "false"
+      - key: UTI_TV_REFRESH_AI
+        value: "false"
       - key: GROQ_API_KEY
         sync: false
       - key: GEMINI_API_KEY

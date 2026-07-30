@@ -153,6 +153,37 @@ def run_decision_cycle(
     if not confluence.get("timeframe"):
         confluence["timeframe"] = normalize_timeframe(timeframe or "30")
     intel = get_worldmonitor_client().fetch_brief(symbol_n)
+
+    # Optional Gemini Google Search grounding (live ticker news) — strengthens the desk
+    grounded = None
+    scan_ground = os.getenv("UTI_SCAN_GROUNDING", "false").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+    if scan_ground:
+        try:
+            from intel.gemini_grounding import fetch_grounded_market_brief, grounding_enabled
+
+            if grounding_enabled():
+                grounded = fetch_grounded_market_brief(symbol_n)
+                if grounded and grounded.get("ok"):
+                    intel = dict(intel)
+                    intel["gemini_grounding"] = grounded
+                    # Soft blend grounded news into WM score
+                    g_score = float(grounded.get("news_score") or 0)
+                    base = float(intel.get("news_score") or 0)
+                    intel["news_score"] = round(max(-1.0, min(1.0, 0.6 * base + 0.4 * g_score)), 4)
+                    if (intel.get("macro_bias") or "NEUTRAL") == "NEUTRAL" and grounded.get("bias") in {
+                        "BULLISH",
+                        "BEARISH",
+                    }:
+                        intel["macro_bias"] = grounded.get("bias")
+                    if grounded.get("summary"):
+                        headlines = list(intel.get("headlines") or [])
+                        headlines.insert(0, f"GeminiSearch: {grounded.get('summary')}")
+                        intel["headlines"] = headlines[:12]
+        except Exception as exc:
+            logger.warning("scan grounding skipped: %s", exc)
+
     swarm = get_mirofish_client().fetch_swarm_brief(symbol_n, confluence=confluence, intel=intel)
     kronos = get_kronos_forecast(symbol_n)
     brain = get_trading_brain().analyze(
@@ -269,6 +300,7 @@ def run_decision_cycle(
         "kronos": bool(kronos) and not kronos.get("disabled"),
         "llm": brain.get("provider") or providers_used.get("llm"),
         "tradingagents": "tradingagents" in str(brain.get("mode") or ""),
+        "gemini_search_grounding": bool(grounded and grounded.get("ok")),
         "research_mode": not bool(confluence.get("ready")),
     }
 
@@ -306,6 +338,7 @@ def run_decision_cycle(
         "intel": intel,
         "swarm": swarm,
         "kronos": kronos,
+        "gemini_grounding": grounded,
         "providers_used": providers_used,
         "unified": True,
         "live_price": (price_meta or {}).get("live"),
