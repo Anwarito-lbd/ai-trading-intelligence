@@ -359,8 +359,29 @@ def register_uti_routes(app: FastAPI) -> None:
         return get_confluence_engine().score(votes, symbol=symbol, timeframe=timeframe)
 
     @app.post("/api/uti/decisions/run")
-    async def uti_run_decision(data: DecisionRunRequest):
-        return run_decision_cycle(symbol=data.symbol, timeframe=data.timeframe, force=data.force)
+    async def uti_run_decision(data: DecisionRunRequest, wait: bool = False):
+        """Run desk. Default is background (Render free returns 502 if HTTP waits >~60s)."""
+        from uti_agents.market_scanner import enqueue_decision, decision_job_status
+
+        # Explicit wait=true only for local/dev when you can afford a long request
+        if wait or os.getenv("UTI_SYNC_DECIDE", "false").strip().lower() in {
+            "1", "true", "yes", "on"
+        }:
+            return run_decision_cycle(
+                symbol=data.symbol, timeframe=data.timeframe, force=data.force
+            )
+        return enqueue_decision(
+            symbol=data.symbol or "XAUUSD",
+            timeframe=data.timeframe or "30",
+            force=data.force,
+            paper=False,
+        )
+
+    @app.get("/api/uti/decisions/job")
+    async def uti_decision_job():
+        from uti_agents.market_scanner import decision_job_status
+
+        return decision_job_status()
 
     @app.get("/api/uti/decisions")
     async def uti_list_decisions(symbol: Optional[str] = None, limit: int = 50):
@@ -494,12 +515,22 @@ def register_uti_routes(app: FastAPI) -> None:
         symbols: Optional[str] = None,
         timeframe: Optional[str] = None,
         notify: bool = True,
+        wait: bool = False,
     ):
-        """One-shot scan. Notify-only on good setups (no auto paper fill)."""
-        from uti_agents.market_scanner import scan_markets
+        """One-shot scan. Default background — Render free 502s if HTTP waits for the desk."""
+        from uti_agents.market_scanner import enqueue_scan, scan_markets
 
         syms = [s.strip().upper() for s in (symbols or "").split(",") if s.strip()] or None
-        return scan_markets(
+        if wait or os.getenv("UTI_SYNC_SCAN", "false").strip().lower() in {
+            "1", "true", "yes", "on"
+        }:
+            return scan_markets(
+                symbols=syms,
+                timeframe=timeframe or "30",
+                notify=notify,
+                paper=False,
+            )
+        return enqueue_scan(
             symbols=syms,
             timeframe=timeframe or "30",
             notify=notify,

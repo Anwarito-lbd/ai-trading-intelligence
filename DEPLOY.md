@@ -20,8 +20,8 @@ Optional: host only `service/frontend` on Vercel pointing at your API URL.
 | **Railway** | Easy | Trial credits | Not permanently free |
 | **Hugging Face Spaces** | Docker/Gradio | Sleeps on free | Possible but awkward for API |
 
-**Recommended free combo:** Render free + [cron-job.org](https://cron-job.org) every 10 minutes → `POST /api/uti/scan/run`  
-That wakes the service and runs the scanner (Telegram only on good setups).
+**Recommended free combo:** Render free + [cron-job.org](https://cron-job.org) every 10 minutes → `POST /api/uti/scan/run?notify=true`  
+That wakes the service and **queues** a background gold scan (HTTP returns immediately — waiting for the desk caused 502s on free Render). Telegram only on good setups.
 
 Use **Groq** in the cloud (`UTI_LLM_PROVIDER=groq`) — free Ollama is too heavy for free tiers.
 
