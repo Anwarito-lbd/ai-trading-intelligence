@@ -58,7 +58,7 @@ def register_uti_routes(app: FastAPI) -> None:
             "mirofish_enabled": os.getenv("MIROFISH_ENABLED", "true"),
             "scan_symbols": os.getenv(
                 "UTI_SCAN_SYMBOLS",
-                "XAUUSD,XAGUSD,NAS100,US30,SPX500,USOIL,EURUSD",
+                "XAUUSD",
             ),
             "mirofish": miro,
             "packages": {
@@ -97,7 +97,7 @@ def register_uti_routes(app: FastAPI) -> None:
             s.strip()
             for s in os.getenv(
                 "UTI_SCAN_SYMBOLS",
-                "XAUUSD,XAGUSD,NAS100,US30,SPX500,USOIL,EURUSD",
+                "XAUUSD",
             ).split(",")
             if s.strip()
         ]
@@ -250,6 +250,19 @@ def register_uti_routes(app: FastAPI) -> None:
                 vote["indicator_id"] = iid
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        from uti_agents.market_scanner import symbol_in_watchlist, watchlist
+
+        if not symbol_in_watchlist(vote["symbol"]):
+            return {
+                "success": True,
+                "ignored": True,
+                "reason": "symbol_not_in_watchlist",
+                "symbol": vote["symbol"],
+                "watchlist": watchlist(),
+                "merged_into_ai": False,
+                "path": "tv_telegram_only",
+            }
 
         name = None
         if iid in INDICATORS and isinstance(INDICATORS[iid], dict):

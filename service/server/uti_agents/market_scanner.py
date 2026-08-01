@@ -17,14 +17,10 @@ from uti_agents.telegram_notify import format_setup_alert, send_telegram, telegr
 
 logger = logging.getLogger(__name__)
 
+# Gold-only by default — multi-market scans were too heavy for free Render
+# and rarely cleared the quality gate → weeks of silence.
 DEFAULT_WATCHLIST = [
     "XAUUSD",  # gold
-    "XAGUSD",  # silver
-    "NAS100",  # nasdaq 100
-    "US30",    # dow jones
-    "SPX500",  # S&P 500
-    "USOIL",   # WTI crude
-    "EURUSD",  # euro / dollar
 ]
 
 _scan_lock = threading.Lock()
@@ -39,6 +35,13 @@ def watchlist() -> list[str]:
     if raw:
         return [s.strip().upper() for s in raw.split(",") if s.strip()]
     return list(DEFAULT_WATCHLIST)
+
+
+def symbol_in_watchlist(symbol: str) -> bool:
+    """True if symbol is allowed for scanner / TV→Telegram alerts."""
+    from intel.symbols import normalize_symbol
+
+    return normalize_symbol(symbol) in {s.upper() for s in watchlist()}
 
 
 def scan_markets(
