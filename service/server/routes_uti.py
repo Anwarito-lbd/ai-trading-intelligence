@@ -377,8 +377,9 @@ def register_uti_routes(app: FastAPI) -> None:
             paper=False,
         )
 
-    @app.get("/api/uti/decisions/job")
+    @app.get("/api/uti/decision-job")
     async def uti_decision_job():
+        """Poll background Force Decide (path avoids /decisions/{trade_number} clash)."""
         from uti_agents.market_scanner import decision_job_status
 
         return decision_job_status()

@@ -205,7 +205,7 @@ def enqueue_decision(
                 "already_running": True,
                 **{k: _last_decision_job.get(k) for k in ("symbol", "timeframe", "started_at")},
                 "poll": "/api/uti/decisions?limit=1",
-                "job": "/api/uti/decisions/job",
+                "job": "/api/uti/decision-job",
             }
 
         _last_decision_job = {
@@ -261,7 +261,7 @@ def enqueue_decision(
             "status": "running",
             "symbol": symbol,
             "timeframe": timeframe,
-            "poll": "/api/uti/decisions/job",
+            "poll": "/api/uti/decision-job",
             "note": "Decision running in background (Render-safe). Poll job endpoint.",
         }
 
